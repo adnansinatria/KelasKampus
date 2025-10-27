@@ -1,51 +1,39 @@
+// src/pages/admin/adminDashboard.tsx
 import { Users, Sprout, CreditCard, TrendingUp, Clock, Plus } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useEffect } from "react";
+import AdminLayout from "@/components/admin/AdminLayout";
 
-export default function Index() {
+const decodeToken = (token: string) => {
+  try { return JSON.parse(atob(token.split('.')[1])); } catch (e) { return null; }
+};
+
+export default function AdminDashboard() {
+  // const navigate = useNavigate();
+
+  // useEffect(() => {
+  //   const token = localStorage.getItem("auth_token");
+  //   if (!token) {
+  //     navigate("/signin", { replace: true });
+  //     return;
+  //   }
+
+  //   const payload = decodeToken(token);
+  //   if (!payload) {
+  //     localStorage.removeItem("auth_token");
+  //     navigate("/signin", { replace: true });
+  //     return;
+  //   }
+    
+  //   // if (payload.role !== 'admin') {
+  //   //   navigate("/dashboard", { replace: true });
+  //   //   return;
+  //   // }
+  // }, [navigate]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#E6F3FF] via-[#F0F7FF] to-[#F8FBFF]">
-      {/* Header */}
-      <header className="bg-white/95 border-b border-gray-200">
-        <div className="max-w-[1363px] mx-auto px-12">
-          <div className="flex items-center justify-between h-20">
-            {/* Logo */}
-            <div className="flex items-center gap-2 md:gap-3">
-              <div className="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-gradient-to-b from-[#89B0C7] to-[#89B1C7] shadow-lg flex items-center justify-center flex-shrink-0">
-                <img
-                  src="https://api.builder.io/api/v1/image/assets/TEMP/0718bd4f94bf824464459174b94b8323644342a4?width=112"
-                  alt="Kelas Kampus"
-                  className="w-12 h-12 md:w-14 md:h-14 rounded-full"
-                />
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-sm md:text-base font-bold text-[#1D293D] leading-5 md:leading-6 truncate">Kelas Kampus</h1>
-                <p className="text-xs text-[#62748E] leading-4 truncate">Tryout Indonesia</p>
-              </div>
-            </div>
-
-            {/* Navigation */}
-            <nav className="hidden md:flex items-center gap-6">
-              <a href="/admin" className="text-sm font-medium text-[#295782] hover:text-[#295782]/80 transition-colors">Dashboard</a>
-              <a href="#" className="text-sm font-medium text-[#64748B] hover:text-[#295782] transition-colors">Pengguna</a>
-              <Link to="/admin-tryout" 
-              className="text-sm font-medium text-[#64748B] hover:text-[#295782] transition-colors"
-              > Tryout
-              </Link>
-              <a href="#" className="text-sm font-medium text-[#64748B] hover:text-[#295782] transition-colors">Transaksi</a>
-              <a href="#" className="text-sm font-medium text-[#64748B] hover:text-[#295782] transition-colors">Pengaturan</a>
-            </nav>
-
-            {/* Mobile Navigation - showing only on small screens */}
-            <nav className="flex md:hidden items-center gap-4 text-xs">
-              <a href="/" className="font-medium text-[#295782]">Dashboard</a>
-              <a href="#" className="font-medium text-[#64748B]">Pengguna</a>
-            </nav>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
+    <AdminLayout>
+      {/* ✅ Content langsung tanpa header, pakai design asli */}
       <div className="max-w-[1363px] mx-auto px-4 md:px-6 py-4">
         {/* Dashboard Title */}
         <div className="mb-4">
@@ -254,18 +242,24 @@ export default function Index() {
           <div className="bg-white rounded-[14px] shadow-sm p-4">
             <h3 className="text-lg font-bold text-[#1E293B] mb-4">Aksi Cepat</h3>
             <div className="space-y-3">
-              <button className="w-full bg-[#295782] text-white rounded-lg py-2.5 px-4 flex items-center justify-center gap-4 hover:bg-[#295782]/90 transition-colors text-sm font-medium">
+              <Link 
+                to="/admin-tryout/new"
+                className="w-full bg-[#295782] text-white rounded-lg py-2.5 px-4 flex items-center justify-center gap-4 hover:bg-[#295782]/90 transition-colors text-sm font-medium"
+              >
                 <Plus className="w-4 h-4" strokeWidth={1.33} />
                 Tambah Tryout Baru
-              </button>
-              <button className="w-full bg-[#295782] text-white rounded-lg py-2.5 px-4 flex items-center justify-center gap-4 hover:bg-[#295782]/90 transition-colors text-sm font-medium">
+              </Link>
+              <Link
+                to="/admin-transaksi?action=add"  // ✅ Tambah query parameter
+                className="w-full bg-[#295782] text-white rounded-lg py-2.5 px-4 flex items-center justify-center gap-4 hover:bg-[#295782]/90 transition-colors text-sm font-medium"
+              >
                 <Plus className="w-4 h-4" strokeWidth={1.33} />
                 Tambah Paket Premium
-              </button>
+              </Link>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </AdminLayout>
   );
 }

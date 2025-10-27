@@ -1,11 +1,10 @@
-// Path: src/pages/SignUp.tsx
-
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Lock, Mail, Eye, EyeOff } from "lucide-react";
 import { useGoogleLogin } from "@react-oauth/google";
+import { supabase } from "@/lib/supabase";
 
 export default function SignUp() {
   const navigate = useNavigate();
@@ -20,6 +19,7 @@ export default function SignUp() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordErrors, setPasswordErrors] = useState<string[]>([]);
   const [confirmPasswordError, setConfirmPasswordError] = useState("");
+  const [emailError, setEmailError] = useState("");
 
   // --- Handlers & Validation ---
   const validatePassword = (pass: string) => {
@@ -43,6 +43,7 @@ export default function SignUp() {
     setConfirmPasswordError(password !== newConfirmPassword ? "Password tidak cocok" : "");
   };
 
+  // ✅ UPDATED: Signup dengan Supabase Auth
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -51,49 +52,79 @@ export default function SignUp() {
       setPasswordErrors(currentPasswordErrors);
       return;
     }
+
     if (password !== confirmPassword) {
       setConfirmPasswordError("Password tidak cocok");
       return;
     }
 
     setIsLoading(true);
+    
     try {
-      const payload = { 
-        method: "signup-regular",
-        email, 
-        password, 
-        nama_lengkap: name
-      };
-
-      // ====================================================================
-      // PERUBAHAN: Menambahkan log untuk melihat data yang akan dikirim
-      console.log("Mengirim data pendaftaran biasa:", payload);
-      // ====================================================================
-
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/auth`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY!}`,
-        },
-        body: JSON.stringify(payload),
+      console.log("🚀 Registering user with Supabase Auth:", email);
+      
+      // ✅ SIGNUP dengan Supabase Auth
+      const { data, error } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          data: {
+            nama_lengkap: name,  // ✅ Simpan nama_lengkap di user_metadata
+            full_name: name,      // ✅ Tambahkan full_name juga untuk kompatibilitas
+            role: 'siswa',
+          }
+        }
       });
+
+      if (error) throw error;
       
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.message || "Pendaftaran gagal");
+      // ✅ Cek apakah email sudah terdaftar (termasuk via Google)
+      if (data?.user && data?.user?.identities?.length === 0) {
+        setEmailError("Email sudah terdaftar. Silakan login atau gunakan email lain.");
+        alert("Email sudah terdaftar, kemungkinan melalui Login dengan Google. Silakan gunakan metode login yang sesuai atau gunakan email lain.");
+        setIsLoading(false);
+        return;
+      }
       
-      alert("Pendaftaran berhasil! Silakan periksa email Anda untuk konfirmasi, lalu login.");
+      console.log("✅ Signup response:", data);
+
+      // ✅ Tambahkan: Simpan data user ke tabel users
+      if (data.user) {
+        const { error: insertError } = await supabase
+          .from('users')
+          .insert({
+            auth_id: data.user.id,
+            nama_lengkap: name,
+            email: email,
+            role: 'siswa'
+          });
+        
+        if (insertError) {
+          console.error("Error inserting to users table:", insertError);
+        }
+      }
+
+      if (data.user && !data.session) {
+        alert("Pendaftaran berhasil! Silakan cek email Anda untuk verifikasi, lalu login.");
+      } else if (data.session) {
+        alert("Pendaftaran berhasil! Email Anda sudah terverifikasi. Silakan login.");
+      }
+
       navigate("/signin");
+      
     } catch (err: any) {
-      console.error(err);
-      alert(err.message || "Terjadi kesalahan saat pendaftaran");
+      console.error("❌ Signup Error:", err);
+      const errorMessage = err.message === "User already registered"
+        ? "Email sudah terdaftar"
+        : err.message;
+      alert(errorMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Logika untuk signup/login dengan Google
+  // ✅ KEEP: Google OAuth (tetap pakai custom backend)
   const handleGoogleSuccess = async (codeResponse: any) => {
       console.log("Respons diterima dari Google OAuth:", codeResponse);
       setIsLoading(true);
@@ -132,7 +163,6 @@ export default function SignUp() {
   return (
     <div className="w-screen h-screen flex">
       {/* Bagian Kiri - Form */}
-      {/* PERBAIKAN DESAIN: Mengganti lg:w-12 menjadi lg:w-1/2 */}
       <div className="w-full lg:w-1/2 flex flex-col justify-start px-8 lg:px-16 pt-6 pb-[100px] min-h-screen overflow-y-auto">
         {/* Logo */}
         <div className="flex items-center gap-2 mb-8">
@@ -152,27 +182,50 @@ export default function SignUp() {
         <form onSubmit={handleSubmit} className="space-y-4 mb-6">
           <div className="relative">
             <Input
-              type="text" placeholder="Masukkan Nama" value={name} onChange={(e) => setName(e.target.value)} disabled={isLoading}
-              className="h-12 rounded-lg border border-gray-300 pl-10 text-sm placeholder:text-gray-400" required
+              type="text" 
+              placeholder="Masukkan Nama" 
+              value={name} 
+              onChange={(e) => setName(e.target.value)} 
+              disabled={isLoading}
+              className="h-12 rounded-lg border border-gray-300 pl-10 text-sm placeholder:text-gray-400" 
+              required
             />
             <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
-              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+              </svg>
             </div>
           </div>
 
           <div className="relative">
             <Input
-              type="email" placeholder="Masukkan Email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={isLoading}
-              className="h-12 rounded-lg border border-gray-300 pl-10 text-sm placeholder:text-gray-400" required
+              type="email"
+              placeholder="Email"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setEmailError(""); // Reset error saat user mengetik
+              }}
+              disabled={isLoading}
+              className="h-12 rounded-lg border border-gray-300 pl-10 text-sm placeholder:text-gray-400"
+              required
             />
+            {emailError && (
+              <p className="text-red-500 text-xs mt-1">{emailError}</p>
+            )}
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           </div>
 
           <div>
             <div className="relative">
               <Input
-                type={showPassword ? "text" : "password"} placeholder="Masukkan Password" value={password} onChange={handlePasswordChange} disabled={isLoading}
-                className={`h-12 rounded-lg border ${passwordErrors.length > 0 ? 'border-red-500' : 'border-gray-300'} pl-10 pr-10 text-sm placeholder:text-gray-400`} required
+                type={showPassword ? "text" : "password"} 
+                placeholder="Masukkan Password" 
+                value={password} 
+                onChange={handlePasswordChange} 
+                disabled={isLoading}
+                className={`h-12 rounded-lg border ${passwordErrors.length > 0 ? 'border-red-500' : 'border-gray-300'} pl-10 pr-10 text-sm placeholder:text-gray-400`} 
+                required
               />
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <div className="absolute right-3 top-1/2 transform -translate-y-1/2 cursor-pointer" onClick={() => setShowPassword(!showPassword)}>
@@ -189,8 +242,13 @@ export default function SignUp() {
           <div>
             <div className="relative">
               <Input
-                type={showConfirmPassword ? "text" : "password"} placeholder="Konfirmasi Password" value={confirmPassword} onChange={handleConfirmPasswordChange} disabled={isLoading}
-                className={`h-12 rounded-lg border ${confirmPasswordError ? 'border-red-500' : 'border-gray-300'} pl-10 pr-10 text-sm placeholder:text-gray-400`} required
+                type={showConfirmPassword ? "text" : "password"} 
+                placeholder="Konfirmasi Password" 
+                value={confirmPassword} 
+                onChange={handleConfirmPasswordChange} 
+                disabled={isLoading}
+                className={`h-12 rounded-lg border ${confirmPasswordError ? 'border-red-500' : 'border-gray-300'} pl-10 pr-10 text-sm placeholder:text-gray-400`} 
+                required
               />
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <div className="absolute right-3 top-1/2 transform -translate-y-1/2 cursor-pointer" onClick={() => setShowConfirmPassword(!showConfirmPassword)}>
@@ -200,14 +258,22 @@ export default function SignUp() {
             {confirmPasswordError && <p className="text-xs text-red-500 mt-1 pl-1">{confirmPasswordError}</p>}
           </div>
 
-          <Button type="submit" disabled={isLoading} className="w-full h-12 rounded-lg bg-blue-800 hover:bg-blue-900 text-white font-medium disabled:opacity-50">
+          <Button 
+            type="submit" 
+            disabled={isLoading} 
+            className="w-full h-12 rounded-lg bg-blue-800 hover:bg-blue-900 text-white font-medium disabled:opacity-50"
+          >
             {isLoading ? "Memproses..." : "Daftar"}
           </Button>
         </form>
 
         <div className="relative my-6">
-          <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-300"></div></div>
-          <div className="relative flex justify-center text-sm"><span className="bg-white px-4 text-gray-500">atau</span></div>
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-300"></div>
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="bg-white px-4 text-gray-500">atau</span>
+          </div>
         </div>
 
         <Button
@@ -237,7 +303,11 @@ export default function SignUp() {
 
       {/* Bagian Kanan - Gambar */}
       <div className="hidden lg:flex lg:w-1/2 h-screen items-center justify-end p-0 bg-white">
-        <img src="https://api.builder.io/api/v1/image/assets/TEMP/47deff871a056c6d8b24f4af0e03461085f838ae?width=800" alt="Student studying" className="w-[80%] h-full object-cover"/>
+        <img 
+          src="https://api.builder.io/api/v1/image/assets/TEMP/47deff871a056c6d8b24f4af0e03461085f838ae?width=800" 
+          alt="Student studying" 
+          className="w-[80%] h-full object-cover"
+        />
       </div>
     </div>
   );

@@ -1,8 +1,5 @@
-// 📁 client/stores/tryoutStore.ts
-
 import { create } from 'zustand';
 
-// 👈 (Opsional tapi direkomendasikan) Buat tipe data untuk sebuah soal
 interface Question {
   question: string;
   optionA: string;
@@ -12,7 +9,6 @@ interface Question {
   answer: string;
 }
 
-// Perbarui interface utama
 interface TryoutState {
   tryoutInfo: {
     id: string | null;
@@ -20,7 +16,6 @@ interface TryoutState {
     tanggal: string;
   };
   isInfoAdded: boolean;
-  // 👇 BARU: Tambahkan state untuk menyimpan soal berdasarkan kategori
   questionsByCategory: {
     [kategoriId: string]: Question[]; // Contoh: { 'kpu': [soal1, soal2], 'lit-id': [soal3] }
   };
@@ -44,8 +39,8 @@ const useTryoutStore = create<TryoutState>((set) => ({
   setQuestionsForCategory: (kategoriId, questions) =>
     set((state) => ({
       questionsByCategory: {
-        ...state.questionsByCategory, // Salin semua soal yang sudah ada
-        [kategoriId]: questions,      // Timpa atau tambahkan soal untuk kategori ini
+        ...state.questionsByCategory, 
+        [kategoriId]: questions,      
       },
     })),
 

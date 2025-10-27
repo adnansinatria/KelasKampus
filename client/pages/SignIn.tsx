@@ -1,22 +1,10 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useGoogleLogin } from "@react-oauth/google";
 import { Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-
-// --- FUNGSI HELPER BARU ---
-// Fungsi kecil untuk mendekode token JWT tanpa library eksternal
-const decodeToken = (token: string) => {
-  try {
-    // Bagian kedua dari token (setelah titik pertama) adalah payload
-    return JSON.parse(atob(token.split('.')[1]));
-  } catch (e) {
-    // Jika token tidak valid, kembalikan null
-    return null;
-  }
-};
+import { supabase } from "@/lib/supabase";
 
 export default function SignIn() {
   const navigate = useNavigate();
@@ -25,106 +13,116 @@ export default function SignIn() {
   const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  
-  const handleLoginSuccess = (token: string) => {
-    localStorage.setItem("auth_token", token);
 
-    // ====================================================================
-    // PERUBAHAN UTAMA: Logika Pengalihan Berbasis Peran
-    // ====================================================================
-    const payload = decodeToken(token);
-
-    if (payload && payload.role === 'admin') {
-      // Jika peran adalah 'admin', arahkan ke dashboard admin
-      console.log("Admin terdeteksi, mengarahkan ke /admin");
-      navigate("/admin", { replace: true });
-    } else {
-      // Jika tidak, arahkan ke dashboard pengguna biasa
-      console.log("Pengguna biasa terdeteksi, mengarahkan ke /dashboard");
-      navigate("/dashboard", { replace: true });
-    }
-  };
-
+  // ✅ Email/Password Login
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); 
+    e.preventDefault();
     setIsLoading(true);
+
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/auth`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY!}`,
-        },
-        body: JSON.stringify({ method: "signin-regular", email, password }),
+      console.log("🔐 Logging in:", email);
+
+      // Login with Supabase Auth
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password,
       });
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.message || "Login gagal");
+      if (error) throw error;
 
-      const token = json?.data?.token;
-      if (token) {
-        handleLoginSuccess(token); // Panggil fungsi handler terpusat
-      } else {
-        throw new Error("Login berhasil, tetapi token tidak ditemukan.");
+      if (!data.session) {
+        throw new Error("Login gagal. Silakan coba lagi.");
       }
+
+      console.log("✅ Login successful");
+
+      // Query user data dari public.users
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('role, nama_lengkap')
+        .eq('auth_id', data.user.id)
+        .single();
+
+      let role = 'siswa'; // Default role
+
+      if (userError) {
+        console.warn("⚠️ User data not found, checking auth metadata...");
+        role = data.user.user_metadata?.role || 'siswa';
+      } else {
+        role = userData.role;
+      }
+
+      console.log("👤 User role:", role);
+
+      // Redirect based on role
+      if (role === "admin") {
+        console.log("→ Redirecting to /admin");
+        navigate("/admin", { replace: true });
+      } else {
+        console.log("→ Redirecting to /dashboard");
+        navigate("/dashboard", { replace: true });
+      }
+
     } catch (err: any) {
-      console.error("Login Error:", err);
-      alert(err.message || "Terjadi kesalahan saat login");
+      console.error("❌ Login Error:", err);
+      
+      let errorMessage = "Terjadi kesalahan saat login";
+      
+      if (err.message.includes("Invalid login credentials")) {
+        errorMessage = "Email atau password salah";
+      } else if (err.message.includes("Email not confirmed")) {
+        errorMessage = "Email belum diverifikasi. Silakan cek inbox Anda.";
+      } else {
+        errorMessage = err.message;
+      }
+      
+      alert(errorMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleGoogleLoginSuccess = async (codeResponse: any) => {
-    setIsLoading(true);
+  // ✅ Google OAuth Login (Supabase Native)
+  const handleGoogleLogin = async () => {
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/auth`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY!,
-          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY!}`,
-        },
-        body: JSON.stringify({ code: codeResponse.code, method: "google-login" }),
+      setIsLoading(true);
+      
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          }
+        }
       });
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.message || "Google Signin failed");
+      if (error) throw error;
 
-      const token = json?.data?.token;
-      if (token) {
-        handleLoginSuccess(token); // Panggil fungsi handler terpusat
-      } else {
-        throw new Error("Login Google berhasil, tetapi token tidak ditemukan.");
-      }
-    } catch (err: any) {
-      console.error("Google Login Error:", err);
-      alert(err.message || "Google login error");
-    } finally {
+      console.log("✅ Google OAuth initiated");
+      // Redirect akan otomatis dilakukan oleh Supabase
+    } catch (error: any) {
+      console.error("❌ Google Login Error:", error);
+      alert("Login dengan Google gagal: " + error.message);
       setIsLoading(false);
     }
   };
-
-  const loginWithGoogle = useGoogleLogin({
-    onSuccess: handleGoogleLoginSuccess,
-    onError: (error) => console.error("Login Gagal:", error),
-    flow: 'auth-code',
-  });
 
   return (
     <div className="w-screen h-screen flex">
       <div className="w-full lg:w-1/2 flex flex-col justify-center px-8 lg:px-16">
         <div className="flex items-center gap-2 mb-8">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center">
-              <div className="w-3 h-3 bg-white rounded-full"></div>
-            </div>
-            <span className="text-lg font-semibold text-black">KelasKampus</span>
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center">
+            <div className="w-3 h-3 bg-white rounded-full"></div>
           </div>
-          <div className="mb-8">
-            <h1 className="text-4xl font-bold text-black mb-2">Selamat Datang</h1>
-            <p className="text-gray-600">Masuk untuk Mulai Persiapan SNBT Anda</p>
-          </div>
+          <span className="text-lg font-semibold text-black">KelasKampus</span>
+        </div>
+        
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold text-black mb-2">Selamat Datang</h1>
+          <p className="text-gray-600">Masuk untuk Mulai Persiapan SNBT Anda</p>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="relative">
@@ -152,7 +150,7 @@ export default function SignIn() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={isLoading}
-                className={`h-12 w-full rounded-lg border border-gray-300 pl-10 pr-10 text-sm placeholder:text-gray-400`}
+                className="h-12 w-full rounded-lg border border-gray-300 pl-10 pr-10 text-sm placeholder:text-gray-400"
                 required
               />
               <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
@@ -190,6 +188,7 @@ export default function SignIn() {
               Forgot Password?
             </Link>
           </div>
+
           <Button
             type="submit"
             disabled={isLoading}
@@ -207,9 +206,10 @@ export default function SignIn() {
             <span className="bg-white px-4 text-gray-500">atau</span>
           </div>
         </div>
+
         <Button
           type="button"
-          onClick={() => loginWithGoogle()}
+          onClick={handleGoogleLogin}
           disabled={isLoading}
           className="w-full h-12 rounded-lg bg-blue-200 hover:bg-blue-300 text-blue-800 font-medium flex items-center justify-center gap-3 disabled:opacity-50"
         >
@@ -221,6 +221,7 @@ export default function SignIn() {
           </svg>
           {isLoading ? "Memproses..." : "Masuk dengan Akun Google"}
         </Button>
+
         <div className="text-center mt-6">
           <p className="text-sm text-gray-600">
             Belum punya akun?{" "}
@@ -230,6 +231,7 @@ export default function SignIn() {
           </p>
         </div>
       </div>
+
       <div className="hidden lg:flex lg:w-1/2 h-screen items-center justify-end p-0 bg-white">
         <img
           src="https://api.builder.io/api/v1/image/assets/TEMP/47deff871a056c6d8b24f4af0e03461085f838ae?width=800"
