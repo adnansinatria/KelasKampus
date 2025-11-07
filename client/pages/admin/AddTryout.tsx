@@ -1,10 +1,8 @@
-// src/pages/admin/AddTryout.tsx
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import toast from "react-hot-toast";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 import useTryoutStore from "../../stores/tryoutStore";
 
 export default function AddNewTryoutPage() {
@@ -17,6 +15,13 @@ export default function AddNewTryoutPage() {
     questionsByCategory,
     resetTryout
   } = useTryoutStore();
+
+  useEffect(() => {
+    return () => {
+      console.log("🧹 AddTryout unmounting - resetting store");
+      resetTryout();
+    };
+  }, [resetTryout]);
 
   const categories = [
     { 
@@ -51,13 +56,14 @@ export default function AddNewTryoutPage() {
     });
   };
 
-  // ✅ FIX: Save tryout with Supabase
+  // ✅ CHANGED: Validate minimal 1 soal + save to API
   const handleSaveTryout = async () => {
     if (!tryoutInfo.name || !tryoutInfo.tanggal) {
       toast.error("Nama Tryout dan Tanggal Ujian wajib diisi.");
       return;
     }
 
+    // ✅ ADDED BACK: Question validation
     if (Object.keys(questionsByCategory).length === 0) {
       toast.error("Minimal harus ada 1 kategori soal yang diisi.");
       return;
@@ -66,53 +72,53 @@ export default function AddNewTryoutPage() {
     setIsSaving(true);
 
     const savePromise = (async () => {
-      console.log("📝 Step 1: Creating tryout...");
+      console.log("📝 Step 1: Creating tryout via API...");
 
-      // ✅ Insert tryout
-      const { data: tryoutData, error: tryoutError } = await supabase
-        .from("tryouts")
-        .insert({
+      try {
+        // ✅ Step 1: Create tryout
+        const tryoutResponse = await api.adminCreateTryout({
           nama_tryout: tryoutInfo.name,
           tanggal_ujian: tryoutInfo.tanggal,
+          kategori: "umum",
+          durasi_menit: 180,
           status: "active",
-        })
-        .select()
-        .single();
+        });
 
-      if (tryoutError) throw tryoutError;
+        const tryoutData = tryoutResponse?.data || tryoutResponse;
+        const tryoutId = tryoutData.id;
 
-      console.log("✅ Step 1: Tryout created with ID:", tryoutData.id);
+        console.log("✅ Step 1: Tryout created with ID:", tryoutId);
 
-      // ✅ Insert questions
-      console.log("📝 Step 2: Inserting questions...");
+        // ✅ Step 2: Insert questions
+        console.log("📝 Step 2: Inserting questions via API...");
 
-      const questionsToInsert: any[] = [];
-      Object.entries(questionsByCategory).forEach(([kategoriId, questions]) => {
-        questions.forEach((q: any) => {
-          questionsToInsert.push({
-            tryout_id: tryoutData.id,
-            kategori_id: kategoriId,
-            soal_text: q.question,
-            opsi_a: q.optionA,
-            opsi_b: q.optionB,
-            opsi_c: q.optionC,
-            opsi_d: q.optionD,
-            jawaban_benar: q.answer,
+        const questionsToInsert: any[] = [];
+        Object.entries(questionsByCategory).forEach(([kategoriId, questions]) => {
+          questions.forEach((q: any) => {
+            questionsToInsert.push({
+              tryout_id: tryoutId,
+              kategori_id: kategoriId,
+              soal_text: q.question,
+              opsi_a: q.optionA,
+              opsi_b: q.optionB,
+              opsi_c: q.optionC,
+              opsi_d: q.optionD,
+              jawaban_benar: q.answer,
+            });
           });
         });
-      });
 
-      const { error: insertError } = await supabase
-        .from("questions")
-        .insert(questionsToInsert);
+        await api.adminBulkInsertQuestions(questionsToInsert);
 
-      if (insertError) throw insertError;
+        console.log("✅ Step 2: Questions inserted");
+        console.log("🎉 Tryout saved successfully!");
 
-      console.log("✅ Step 2: Questions inserted");
-      console.log("🎉 Tryout saved successfully!");
-
-      resetTryout();
-      navigate("/admin-tryout");
+        resetTryout();
+        navigate("/admin-tryout");
+      } catch (err: any) {
+        console.error("❌ Error:", err);
+        throw err;
+      }
     })();
 
     toast.promise(savePromise, {
@@ -129,7 +135,7 @@ export default function AddNewTryoutPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F8FBFF] to-[#EFF6FF] p-6">
       <div className="max-w-4xl mx-auto">
-        {/* Header */}
+        {/* Header - TIDAK DIUBAH */}
         <div className="flex items-center gap-4 mb-8">
           <Link
             to="/admin-tryout"
@@ -145,7 +151,7 @@ export default function AddNewTryoutPage() {
           </div>
         </div>
 
-        {/* Tryout Info Card */}
+        {/* Tryout Info Card - TIDAK DIUBAH */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">
           <h2 className="text-lg font-bold text-[#1E293B] mb-4">Informasi Tryout</h2>
           <div className="space-y-4">
@@ -160,6 +166,7 @@ export default function AddNewTryoutPage() {
                 onChange={handleInputChange}
                 placeholder="Contoh: Tryout UTBK 2025 #1"
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#295782]"
+                disabled={isSaving}
               />
             </div>
             <div>
@@ -172,12 +179,13 @@ export default function AddNewTryoutPage() {
                 value={tryoutInfo.tanggal}
                 onChange={handleInputChange}
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#295782]"
+                disabled={isSaving}
               />
             </div>
           </div>
         </div>
 
-        {/* Categories List */}
+        {/* Categories List - TIDAK DIUBAH */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">
           <h2 className="text-lg font-bold text-[#1E293B] mb-4">Kategori Soal</h2>
           <div className="space-y-4">
@@ -190,7 +198,8 @@ export default function AddNewTryoutPage() {
                     return (
                       <Link
                         key={sub.id}
-                        to={`/admin-tryout/:tryoutId/${sub.id}/questions/new`}
+                        to={`/admin-tryout/new/${sub.id}/questions/new`} 
+                        // ✅ CHANGED: Use 'new' sebagai placeholder untuk identify add mode
                         className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                       >
                         <span className="text-sm text-[#1E293B]">{sub.name}</span>
@@ -206,7 +215,7 @@ export default function AddNewTryoutPage() {
           </div>
         </div>
 
-        {/* Summary Card */}
+        {/* Summary Card - TIDAK DIUBAH */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">
           <div className="flex items-center justify-between">
             <div>
@@ -215,7 +224,7 @@ export default function AddNewTryoutPage() {
             </div>
             <button
               onClick={handleSaveTryout}
-              disabled={isSaving}
+              disabled={isSaving || !tryoutInfo.name || !tryoutInfo.tanggal}
               className="px-6 py-2 bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isSaving ? "Menyimpan..." : "Simpan Tryout"}

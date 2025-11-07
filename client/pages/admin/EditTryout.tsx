@@ -5,7 +5,7 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Save } from "lucide-react";
 import useTryoutStore from "../../stores/tryoutStore";
 import toast from "react-hot-toast";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api";
 
 const CATEGORIES = [
   {
@@ -37,16 +37,16 @@ export default function EditTryout() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState(null);
   const [status, setStatus] = useState("active");
-  
-  const { 
-    tryoutInfo, 
-    setTryoutInfo, 
-    questionsByCategory, 
-    setQuestionsForCategory, 
-    resetTryout 
+
+  const {
+    tryoutInfo,
+    setTryoutInfo,
+    questionsByCategory,
+    setQuestionsForCategory,
+    resetTryout
   } = useTryoutStore();
 
-  // ✅ PERBAIKAN: Fetch tryout data dengan reset store terlebih dahulu
+  // ✅ CHANGED: Fetch tryout data via API
   const fetchTryoutDetail = async () => {
     setIsLoading(true);
     setError(null);
@@ -58,14 +58,9 @@ export default function EditTryout() {
       console.log("🔄 Resetting store...");
       resetTryout();
 
-      // ✅ Fetch tryout info
-      const { data: tryoutData, error: tryoutError } = await supabase
-        .from("tryouts")
-        .select("*")
-        .eq("id", id)
-        .single();
-
-      if (tryoutError) throw tryoutError;
+      // ✅ CHANGED: Fetch from API instead of supabase
+      const tryoutResponse = await api.adminGetTryoutDetail(id!);
+      const tryoutData = tryoutResponse?.data || tryoutResponse;
 
       console.log("📊 Tryout data loaded:", tryoutData);
 
@@ -77,20 +72,23 @@ export default function EditTryout() {
 
       setStatus(tryoutData.status || "active");
 
-      // ✅ Fetch questions by category
-      const { data: soalData, error: soalError } = await supabase
-        .from("questions")
-        .select("*")
-        .eq("tryout_id", id);
+      const questionsResponse = await api.adminGetTryoutQuestions(id!);
+      const questionsData = questionsResponse?.data || questionsResponse;
 
-      if (soalError) throw soalError;
+      console.log("📊 Questions response:", questionsResponse);
+      console.log("📝 Questions data:", questionsData);
 
-      console.log(`📝 Loaded ${soalData.length} questions for tryout ${id}`);
+      // ✅ Ensure questionsData is array
+      if (!Array.isArray(questionsData)) {
+        throw new Error('Invalid questions data format - expected array');
+      }
+
+      console.log(`📝 Loaded ${questionsData.length} questions for tryout ${id}`);
 
       // ✅ Group questions by kategori_id
       const questionsByKategori: Record<string, any[]> = {};
-      
-      soalData.forEach((q: any) => {
+
+      questionsData.forEach((q: any) => {
         if (!questionsByKategori[q.kategori_id]) {
           questionsByKategori[q.kategori_id] = [];
         }
@@ -107,12 +105,13 @@ export default function EditTryout() {
 
       // ✅ Set questions to store
       Object.entries(questionsByKategori).forEach(([kategoriId, questions]) => {
-        console.log(`✅ Setting ${questions.length} questions for kategori ${kategoriId}`);
+        console.log(
+          `✅ Setting ${questions.length} questions for kategori ${kategoriId}`
+        );
         setQuestionsForCategory(kategoriId, questions);
       });
 
       console.log("✅ All questions loaded to store");
-
     } catch (err: any) {
       console.error("❌ Error:", err);
       setError(err.message);
@@ -122,7 +121,7 @@ export default function EditTryout() {
     }
   };
 
-  // ✅ PERBAIKAN: Re-fetch setiap kali ID berubah
+  // ✅ Re-fetch setiap kali ID berubah
   useEffect(() => {
     if (id) {
       fetchTryoutDetail();
@@ -143,6 +142,7 @@ export default function EditTryout() {
     });
   };
 
+  // ✅ CHANGED: Use API to update tryout
   const handleUpdateTryout = async () => {
     if (!tryoutInfo.name || !tryoutInfo.tanggal) {
       toast.error("Nama Tryout dan Tanggal Ujian wajib diisi.");
@@ -152,37 +152,29 @@ export default function EditTryout() {
     setIsSaving(true);
 
     const updatePromise = (async () => {
-      console.log("📝 Step 1: Updating tryout info...");
+      console.log("📝 Step 1: Updating tryout info via API...");
 
-      // ✅ Update tryout info
-      const { error: updateError } = await supabase
-        .from("tryouts")
-        .update({
-          nama_tryout: tryoutInfo.name,
-          tanggal_ujian: tryoutInfo.tanggal,
-          status: status,
-        })
-        .eq("id", id);
+      // ✅ CHANGED: Use API to update tryout
+      await api.adminUpdateTryout(id!, {
+        nama_tryout: tryoutInfo.name,
+        tanggal_ujian: tryoutInfo.tanggal,
+        status: status,
+      });
 
-      if (updateError) throw updateError;
       console.log("✅ Step 1: Info updated");
 
-      // ✅ Delete old questions
-      console.log("📝 Step 2: Deleting old questions...");
-      const { error: deleteError } = await supabase
-        .from("questions")
-        .delete()
-        .eq("tryout_id", id);
-
-      if (deleteError) {
-        console.warn("⚠️ Warning: Failed to delete old questions:", deleteError);
-      } else {
+      // ✅ CHANGED: Use API to delete old questions
+      console.log("📝 Step 2: Deleting old questions via API...");
+      try {
+        await api.adminDeleteQuestions(id!);
         console.log("✅ Step 2: Old questions deleted");
+      } catch (err) {
+        console.warn("⚠️ Warning: Failed to delete old questions:", err);
       }
 
       // ✅ Insert new questions
       if (Object.keys(questionsByCategory).length > 0) {
-        console.log("📝 Step 3: Inserting new questions...");
+        console.log("📝 Step 3: Inserting new questions via API...");
         const questionsToInsert: any[] = [];
 
         Object.entries(questionsByCategory).forEach(([kategoriId, questions]) => {
@@ -202,11 +194,9 @@ export default function EditTryout() {
 
         console.log(`💾 Inserting ${questionsToInsert.length} questions...`);
 
-        const { error: insertError } = await supabase
-          .from("questions")
-          .insert(questionsToInsert);
+        // ✅ CHANGED: Use API to insert questions
+        await api.adminBulkInsertQuestions(questionsToInsert);
 
-        if (insertError) throw insertError;
         console.log("✅ Step 3: New questions inserted");
       }
 
@@ -216,8 +206,8 @@ export default function EditTryout() {
     })();
 
     toast.promise(updatePromise, {
-      loading: 'Menyimpan perubahan...',
-      success: 'Tryout berhasil diupdate!',
+      loading: "Menyimpan perubahan...",
+      success: "Tryout berhasil diupdate!",
       error: (err) => `Gagal mengupdate: ${err.message}`,
     }).finally(() => setIsSaving(false));
   };
@@ -331,14 +321,18 @@ export default function EditTryout() {
 
       {/* Bagian 2: Kelola Kategori Soal */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-        <h3 className="text-lg font-bold text-[#1E293B] mb-2">Kelola Kategori Soal</h3>
+        <h3 className="text-lg font-bold text-[#1E293B] mb-2">
+          Kelola Kategori Soal
+        </h3>
         <p className="text-sm text-[#64748B] mb-4">
           Klik "Tambah/Edit Soal" untuk mengubah soal di kategori tertentu
         </p>
 
         {CATEGORIES.map((cat) => (
           <div key={cat.name} className="mb-6">
-            <h4 className="text-md font-semibold text-[#295782] mb-3">{cat.name}</h4>
+            <h4 className="text-md font-semibold text-[#295782] mb-3">
+              {cat.name}
+            </h4>
             <div className="space-y-2">
               {cat.subcategories.map((sub) => {
                 const savedQuestions = questionsByCategory[sub.id] || [];
@@ -350,7 +344,9 @@ export default function EditTryout() {
                     className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50"
                   >
                     <div>
-                      <p className="text-sm font-medium text-[#1E293B]">{sub.name}</p>
+                      <p className="text-sm font-medium text-[#1E293B]">
+                        {sub.name}
+                      </p>
                       {hasQuestions && (
                         <p className="text-xs text-green-600 mt-1">
                           {savedQuestions.length} soal tersimpan
@@ -358,7 +354,7 @@ export default function EditTryout() {
                       )}
                     </div>
                     <Link
-                      to={`/admin-tryout/edit-question/${id}/${sub.id}`}
+                      to={`/admin-tryout/${id}/${sub.id}/questions/new`}
                       className="px-4 py-2 text-sm bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90"
                     >
                       {hasQuestions ? "✏️ Edit Soal" : "+ Tambah Soal"}

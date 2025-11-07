@@ -5,10 +5,10 @@ import { Search, ChevronDown, Eye, Edit2, Trash2, FileText, Upload } from "lucid
 import { Link, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import AdminLayout from "@/components/admin/AdminLayout";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api"; // ✅ ADDED: Import API instead of supabase
 import ImportTryoutCSV from "@/components/admin/ImportTryoutCSV";
 
-console.log("🔥 adminTryout.tsx VERSION 3.0 - LOADED WITH ORIGINAL DESIGN");
+console.log("🔥 adminTryout.tsx VERSION 4.0 - USING API INSTEAD OF HARDCODE");
 
 export default function AdminTryout() {
   const [tryouts, setTryouts] = useState<any[]>([]);
@@ -22,80 +22,59 @@ export default function AdminTryout() {
     navigate("/signin", { replace: true });
   };
 
+  // ✅ CHANGED: Use API instead of direct supabase
   const fetchTryouts = async () => {
     try {
       setIsLoading(true);
-      console.log("🔍 Fetching tryouts...");
+      setError(null);
+      console.log("🔄 Fetching tryouts via API...");
 
-      // Step 1: Fetch all tryouts
-      const { data: tryoutsData, error: tryoutsError } = await supabase
-        .from("tryouts")
-        .select("id, nama_tryout, tanggal_ujian, status, created_at")
-        .order("created_at", { ascending: false });
+      // ✅ NEW: Call API instead of supabase
+      const response = await api.adminGetTryouts();
+      
+      console.log("✅ API Response:", response);
 
-      if (tryoutsError) {
-        console.error("❌ Tryouts error:", tryoutsError);
-        throw tryoutsError;
-      }
+      const tryoutsData = Array.isArray(response?.data) ? response.data : [];
 
-      console.log("✅ Tryouts loaded:", tryoutsData?.length);
+      console.log("✅ Tryouts loaded:", tryoutsData.length);
 
-      // Step 2: Fetch question counts for ALL tryouts in ONE query
-      const { data: countsData, error: countsError } = await supabase
-        .from("questions")
-        .select("tryout_id");
-
-      if (countsError) {
-        console.error("❌ Counts error:", countsError);
-        throw countsError;
-      }
-
-      console.log("✅ Questions loaded:", countsData?.length);
-
-      // Step 3: Count questions per tryout
-      const countMap: Record<string, number> = {};
-      countsData?.forEach((q) => {
-        const id = q.tryout_id;
-        countMap[id] = (countMap[id] || 0) + 1;
-      });
-
-      console.log("📊 Count map:", countMap);
-
-      // Step 4: Merge tryouts with counts
-      const tryoutsWithCount = tryoutsData?.map((tryout) => ({
+      // ✅ API should already return with jumlah_soal
+      // If not, calculate here
+      const tryoutsWithCount = tryoutsData.map((tryout: any) => ({
         ...tryout,
-        jumlah_soal: countMap[tryout.id] || 0,
+        jumlah_soal: tryout.jumlah_soal || 0,
       }));
 
       console.log("🎉 Final result:", tryoutsWithCount);
-      setTryouts(tryoutsWithCount || []);
+      setTryouts(tryoutsWithCount);
 
     } catch (err: any) {
       console.error("❌ Failed to fetch tryouts:", err);
-      setError(err.message);
-      toast.error(`Gagal memuat data: ${err.message}`);
+      const errorMessage = err.message || "Gagal memuat data tryout";
+      setError(errorMessage);
+      toast.error(`Gagal memuat data: ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
   };
 
+  // ✅ CHANGED: Use API instead of direct supabase
   const handleDelete = async (tryoutId: string, tryoutName: string) => {
     const deletePromise = (async () => {
-      const { error } = await supabase
-        .from("tryouts")
-        .delete()
-        .eq("id", tryoutId);
+      console.log("🗑️ Deleting tryout:", tryoutId);
 
-      if (error) {
-        throw new Error(error.message);
-      }
+      // ✅ NEW: Use API instead of supabase
+      await api.adminDeleteTryout(tryoutId);
 
+      console.log("✅ Tryout deleted");
+
+      // Refresh data after delete
       await fetchTryouts();
       return tryoutName;
     })();
 
     toast.promise(deletePromise, {
-      loading: 'Menghapus tryout...',
+      loading: "Menghapus tryout...",
       success: (name) => `"${name}" berhasil dihapus!`,
       error: (err) => `Gagal menghapus: ${err.message}`,
     });
@@ -110,7 +89,10 @@ export default function AdminTryout() {
       <AdminLayout>
         <div className="max-w-[1363px] mx-auto px-4 md:px-6 py-8">
           <div className="flex justify-center items-center h-64">
-            <div className="text-xl text-[#1E293B]">Loading tryouts...</div>
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#295782] mx-auto mb-4"></div>
+              <div className="text-xl text-[#1E293B]">Loading tryouts...</div>
+            </div>
           </div>
         </div>
       </AdminLayout>
@@ -123,7 +105,7 @@ export default function AdminTryout() {
         <div className="max-w-[1363px] mx-auto px-4 md:px-6 py-8">
           <div className="flex flex-col items-center justify-center h-64">
             <div className="text-xl text-red-600 mb-4">Error: {error}</div>
-            <button 
+            <button
               onClick={fetchTryouts}
               className="px-4 py-2 bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90 transition-colors"
             >
@@ -177,11 +159,21 @@ export default function AdminTryout() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-200">
-                  <th className="px-4 py-4 text-left text-sm font-medium text-[#1E293B]">Nama Tryout</th>
-                  <th className="px-4 py-4 text-left text-sm font-medium text-[#1E293B]">Jumlah Soal</th>
-                  <th className="px-4 py-4 text-left text-sm font-medium text-[#1E293B]">Status</th>
-                  <th className="px-4 py-4 text-left text-sm font-medium text-[#1E293B]">Jadwal Ujian</th>
-                  <th className="px-4 py-4 text-left text-sm font-medium text-[#1E293B]">Aksi</th>
+                  <th className="px-4 py-4 text-left text-sm font-medium text-[#1E293B]">
+                    Nama Tryout
+                  </th>
+                  <th className="px-4 py-4 text-left text-sm font-medium text-[#1E293B]">
+                    Jumlah Soal
+                  </th>
+                  <th className="px-4 py-4 text-left text-sm font-medium text-[#1E293B]">
+                    Status
+                  </th>
+                  <th className="px-4 py-4 text-left text-sm font-medium text-[#1E293B]">
+                    Jadwal Ujian
+                  </th>
+                  <th className="px-4 py-4 text-left text-sm font-medium text-[#1E293B]">
+                    Aksi
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -193,19 +185,34 @@ export default function AdminTryout() {
                   </tr>
                 ) : (
                   tryouts.map((tryout, index) => (
-                    <tr key={tryout.id} className={`border-b border-gray-100 ${index % 2 === 1 ? 'bg-[#F9FBFF]' : 'bg-white'}`}>
+                    <tr
+                      key={tryout.id}
+                      className={`border-b border-gray-100 ${
+                        index % 2 === 1 ? "bg-[#F9FBFF]" : "bg-white"
+                      }`}
+                    >
                       <td className="px-4 py-5">
-                        <p className="text-sm font-bold text-[#1E293B]">{tryout.nama_tryout}</p>
+                        <p className="text-sm font-bold text-[#1E293B]">
+                          {tryout.nama_tryout}
+                        </p>
                       </td>
                       <td className="px-4 py-5">
-                        <p className="text-sm text-[#1E293B]">{tryout.jumlah_soal || 0}</p>
+                        <p className="text-sm text-[#1E293B]">
+                          {tryout.jumlah_soal || 0}
+                        </p>
                       </td>
                       <td className="px-4 py-5">
                         <span
                           className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-normal"
                           style={{
-                            backgroundColor: tryout.status === "active" ? "#DCFCE7" : "#F3F4F6",
-                            color: tryout.status === "active" ? "#016630" : "#4A5565"
+                            backgroundColor:
+                              tryout.status === "active"
+                                ? "#DCFCE7"
+                                : "#F3F4F6",
+                            color:
+                              tryout.status === "active"
+                                ? "#016630"
+                                : "#4A5565",
                           }}
                         >
                           {tryout.status === "active" ? "Aktif" : "Nonaktif"}
@@ -213,36 +220,57 @@ export default function AdminTryout() {
                       </td>
                       <td className="px-4 py-5">
                         <p className="text-sm text-[#64748B]">
-                          {new Date(tryout.tanggal_ujian).toLocaleDateString("id-ID", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })}
+                          {new Date(tryout.tanggal_ujian).toLocaleDateString(
+                            "id-ID",
+                            {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            }
+                          )}
                         </p>
                       </td>
                       <td className="px-4 py-5">
                         <div className="flex items-center gap-2">
-                          <button 
-                            onClick={() => navigate(`/admin-tryout/view/${tryout.id}`)}
+                          <button
+                            onClick={() =>
+                              navigate(`/admin-tryout/view/${tryout.id}`)
+                            }
                             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors"
+                            title="Lihat detail"
                           >
-                            <Eye className="w-4 h-4 text-[#155EEF]" strokeWidth={1.33} />
+                            <Eye
+                              className="w-4 h-4 text-[#155EEF]"
+                              strokeWidth={1.33}
+                            />
                           </button>
-                          <button 
-                            onClick={() => navigate(`/admin-tryout/edit/${tryout.id}`)}
+                          <button
+                            onClick={() =>
+                              navigate(`/admin-tryout/edit/${tryout.id}`)
+                            }
                             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 transition-colors"
+                            title="Edit tryout"
                           >
-                            <Edit2 className="w-4 h-4 text-[#155EEF]" strokeWidth={1.33} />
+                            <Edit2
+                              className="w-4 h-4 text-[#155EEF]"
+                              strokeWidth={1.33}
+                            />
                           </button>
-                          <button 
+                          <button
                             onClick={() => {
-                              if (confirm(`Hapus "${tryout.nama_tryout}"?`)) {
+                              if (
+                                confirm(`Hapus "${tryout.nama_tryout}"?`)
+                              ) {
                                 handleDelete(tryout.id, tryout.nama_tryout);
                               }
                             }}
-                            className="p-2 rounded-lg hover:bg-red-50 transition-colors group disabled:opacity-30"
+                            className="p-2 rounded-lg hover:bg-red-50 transition-colors group"
+                            title="Hapus tryout"
                           >
-                            <Trash2 className="w-4 h-4 text-[#64748B] group-hover:text-[#EF4444]" strokeWidth={1.5} />
+                            <Trash2
+                              className="w-4 h-4 text-[#64748B] group-hover:text-[#EF4444]"
+                              strokeWidth={1.5}
+                            />
                           </button>
                         </div>
                       </td>
@@ -255,12 +283,16 @@ export default function AdminTryout() {
 
           {/* Pagination */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-4 py-4 border-t border-gray-200">
-            <p className="text-xs text-[#64748B]">Menampilkan {tryouts.length} dari {tryouts.length} tryout</p>
+            <p className="text-xs text-[#64748B]">
+              Menampilkan {tryouts.length} dari {tryouts.length} tryout
+            </p>
             <div className="flex items-center gap-2">
               <button className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors">
                 <ChevronDown className="w-4 h-4 rotate-90 text-gray-400" />
               </button>
-              <button className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#155EEF] bg-[#155EEF] text-white text-sm">1</button>
+              <button className="w-8 h-8 flex items-center justify-center rounded-lg border border-[#155EEF] bg-[#155EEF] text-white text-sm">
+                1
+              </button>
               <button className="w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition-colors">
                 <ChevronDown className="w-4 h-4 -rotate-90 text-gray-400" />
               </button>
@@ -272,8 +304,12 @@ export default function AdminTryout() {
         <div className="bg-white rounded-2xl border border-gray-200 shadow-lg p-6">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
             <div>
-              <h3 className="text-xl font-bold text-[#1E293B] mb-1">Upload soal tryout</h3>
-              <p className="text-sm text-[#64748B]">Unggah soal baru secara manual atau melalui file CSV.</p>
+              <h3 className="text-xl font-bold text-[#1E293B] mb-1">
+                Upload soal tryout
+              </h3>
+              <p className="text-sm text-[#64748B]">
+                Unggah soal baru secara manual atau melalui file CSV.
+              </p>
             </div>
             <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
               <Link

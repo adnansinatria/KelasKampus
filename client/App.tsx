@@ -13,20 +13,27 @@ import { Toaster } from "react-hot-toast";
 import Index from "./pages/Index";
 import ProtectedRoute from "./components/ProtectedRoute"; // ✅ IMPORT
 import AuthCallback from "./pages/AuthCallback";
+
+// Auth Pages
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
+
 import ForgotPassword from "./pages/ForgotPassword";
 import Dashboard from "./pages/Dashboard";
+import TryoutList from "./pages/TryoutList";
+import TryoutStart from "./pages/TryoutStart";
+import TryoutExam from "./pages/TryoutExam";
+
 import AdminDashboard from "./pages/admin/adminDashboard";
 import AdminUser from "./pages/admin/AdminUser";
 import AdminTransaksi from "./pages/admin/adminPaketTransaksi";
 import AdminTryout from "./pages/admin/adminTryout";
+import AdminPengaturan from "./pages/admin/AdminPengaturan";
 import AddTryoutPage from "./pages/admin/AddTryout";
 import AddQuestionPage from "./pages/admin/AddQuestionPage";
 import ViewTryout from "./pages/admin/ViewTryout";
 import EditTryout from "./pages/admin/EditTryout";
 import Profile from "./pages/Profile";
-import AdminPengaturan from "./pages/admin/AdminPengaturan";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -56,6 +63,33 @@ const App = () => (
                   <Dashboard />
                 </ProtectedRoute>
               } 
+            />
+
+            <Route 
+              path="/tryout" 
+              element={
+                <ProtectedRoute requiredRole="siswa">
+                  <TryoutList />
+                </ProtectedRoute>
+              } 
+            />
+
+            <Route
+              path="/tryout/:tryoutId/start"
+              element={
+                <ProtectedRoute>
+                  <TryoutStart />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/tryout/:tryoutId/exam"
+              element={
+                <ProtectedRoute>
+                  <TryoutExam />
+                </ProtectedRoute>
+              }
             />
 
             {/* ✅ Admin Routes (Protected - Admin Only) */}

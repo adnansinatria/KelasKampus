@@ -1,10 +1,8 @@
-// src/components/admin/ImportTryoutCSV.tsx
-
 import { useState, useRef } from "react";
 import { Upload, X, FileText, AlertCircle, CheckCircle } from "lucide-react";
 import Papa from "papaparse";
 import toast from "react-hot-toast";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api"; // ✅ CHANGED: Import API
 import { useNavigate } from "react-router-dom";
 
 interface ImportTryoutCSVProps {
@@ -160,6 +158,7 @@ export default function ImportTryoutCSV({
     });
   };
 
+  // ✅ CHANGED: Use API instead of supabase directly
   const handleImport = async () => {
     if (!previewData) {
       toast.error("Tidak ada data untuk diimport");
@@ -169,54 +168,54 @@ export default function ImportTryoutCSV({
     setIsImporting(true);
 
     const importPromise = (async () => {
-      console.log("📝 Step 1: Creating tryout...");
+      console.log("📝 Step 1: Creating tryout via API...");
 
-      // 1. Insert tryout
-      const { data: tryoutData, error: tryoutError } = await supabase
-        .from("tryouts")
-        .insert({
+      try {
+        // ✅ Step 1: Create tryout via API
+        const tryoutResponse = await api.adminCreateTryout({
           nama_tryout: previewData.nama_tryout,
           tanggal_ujian: previewData.tanggal_ujian,
+          kategori: "umum",
+          durasi_menit: 180,
           status: previewData.status,
-        })
-        .select()
-        .single();
+        });
 
-      if (tryoutError) throw tryoutError;
+        const tryoutData = tryoutResponse?.data || tryoutResponse;
+        const tryoutId = tryoutData.id;
 
-      const tryoutId = tryoutData.id;
-      console.log(`✅ Tryout created with ID: ${tryoutId}`);
+        console.log(`✅ Tryout created with ID: ${tryoutId}`);
 
-      // 2. Insert questions
-      console.log("📝 Step 2: Inserting questions...");
-      const questionsToInsert: any[] = [];
+        // ✅ Step 2: Insert questions via API
+        console.log("📝 Step 2: Inserting questions via API...");
+        const questionsToInsert: any[] = [];
 
-      Object.entries(previewData.questions).forEach(([kategoriId, questions]: [string, any]) => {
-        questions.forEach((q: any) => {
-          questionsToInsert.push({
-            tryout_id: tryoutId,
-            kategori_id: kategoriId,
-            soal_text: q.soal_text,
-            opsi_a: q.opsi_a,
-            opsi_b: q.opsi_b,
-            opsi_c: q.opsi_c,
-            opsi_d: q.opsi_d,
-            jawaban_benar: q.jawaban_benar,
+        Object.entries(previewData.questions).forEach(([kategoriId, questions]: [string, any]) => {
+          questions.forEach((q: any) => {
+            questionsToInsert.push({
+              tryout_id: tryoutId,
+              kategori_id: kategoriId,
+              soal_text: q.soal_text,
+              opsi_a: q.opsi_a,
+              opsi_b: q.opsi_b,
+              opsi_c: q.opsi_c,
+              opsi_d: q.opsi_d,
+              jawaban_benar: q.jawaban_benar,
+            });
           });
         });
-      });
 
-      console.log(`💾 Inserting ${questionsToInsert.length} questions...`);
+        console.log(`💾 Inserting ${questionsToInsert.length} questions via API...`);
 
-      const { error: insertError } = await supabase
-        .from("questions")
-        .insert(questionsToInsert);
+        // ✅ Use API to bulk insert questions
+        await api.adminBulkInsertQuestions(questionsToInsert);
 
-      if (insertError) throw insertError;
+        console.log("✅ All questions inserted!");
 
-      console.log("✅ All questions inserted!");
-
-      return { tryoutId, totalQuestions: questionsToInsert.length };
+        return { tryoutId, totalQuestions: questionsToInsert.length };
+      } catch (err: any) {
+        console.error("❌ Import error:", err);
+        throw err;
+      }
     })();
 
     toast
@@ -233,6 +232,9 @@ export default function ImportTryoutCSV({
         setTimeout(() => {
           navigate(`/admin-tryout`);
         }, 1000);
+      })
+      .catch((err) => {
+        console.error("❌ Import failed:", err);
       })
       .finally(() => {
         setIsImporting(false);

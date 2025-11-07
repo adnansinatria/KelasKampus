@@ -21,7 +21,6 @@ interface TryoutState {
   };
   setTryoutInfo: (info: TryoutState['tryoutInfo']) => void;
   setIsInfoAdded: (status: boolean) => void;
-  // 👇 BARU: Tambahkan fungsi untuk menyimpan soal ke kategori tertentu
   setQuestionsForCategory: (kategoriId: string, questions: Question[]) => void;
   resetTryout: () => void;
 }

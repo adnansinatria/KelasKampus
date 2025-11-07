@@ -1,13 +1,11 @@
-// src/pages/admin/ViewTryout.tsx
-
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, FileText, CheckCircle2, Edit2, ChevronDown } from "lucide-react";
 import toast from "react-hot-toast";
-import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api"; // ✅ CHANGED: Import API
 import AdminLayout from "@/components/admin/AdminLayout";
 
-// ✅ Kategori struktur dengan GROUPING
+// ✅ Kategori struktur dengan GROUPING - TIDAK DIUBAH
 const CATEGORIES = [
   {
     id: "tps",
@@ -45,33 +43,32 @@ export default function ViewTryout() {
   const [error, setError] = useState<string | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
 
+  // ✅ CHANGED: Fetch via API instead of supabase
   const fetchTryoutDetail = async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      console.log("🔍 Fetching tryout detail:", id);
+      console.log("🔍 Fetching tryout detail via API:", id);
 
-      const { data: tryoutData, error: tryoutError } = await supabase
-        .from("tryouts")
-        .select("*")
-        .eq("id", id)
-        .single();
-
-      if (tryoutError) throw tryoutError;
+      // ✅ CHANGED: Use API to get tryout detail
+      const tryoutResponse = await api.adminGetTryoutDetail(id!);
+      const tryoutData = tryoutResponse?.data || tryoutResponse;
 
       console.log("📊 Tryout data:", tryoutData);
       setTryout(tryoutData);
 
-      const { data: soalData, error: soalError } = await supabase
-        .from("questions")
-        .select("*")
-        .eq("tryout_id", id);
+      // ✅ CHANGED: Use API to get questions
+      const questionsResponse = await api.adminGetTryoutQuestions(id!);
+      const soalData = questionsResponse?.data || questionsResponse;
 
-      if (soalError) throw soalError;
+      if (!Array.isArray(soalData)) {
+        throw new Error("Invalid questions data format");
+      }
 
       console.log("📝 Questions loaded:", soalData?.length);
 
+      // ✅ UNCHANGED: Group questions by kategori_id
       const grouped: Record<string, any[]> = {};
       soalData?.forEach((q: any) => {
         if (!grouped[q.kategori_id]) {
@@ -91,10 +88,12 @@ export default function ViewTryout() {
     }
   };
 
+  // ✅ UNCHANGED: useEffect
   useEffect(() => {
     fetchTryoutDetail();
   }, [id]);
 
+  // ✅ UNCHANGED: Toggle category
   const toggleCategory = (categoryId: string) => {
     setExpandedCategories((prev) => ({
       ...prev,
@@ -102,10 +101,12 @@ export default function ViewTryout() {
     }));
   };
 
+  // ✅ UNCHANGED: Get total questions
   const getTotalQuestions = () => {
     return Object.values(questionsByCategory).reduce((sum, questions) => sum + questions.length, 0);
   };
 
+  // ✅ UNCHANGED: Loading state
   if (isLoading) {
     return (
       <AdminLayout>
@@ -116,6 +117,7 @@ export default function ViewTryout() {
     );
   }
 
+  // ✅ UNCHANGED: Error state
   if (error || !tryout) {
     return (
       <AdminLayout>
@@ -189,7 +191,7 @@ export default function ViewTryout() {
           </div>
         </div>
 
-        {/* ✅ BAGIAN INI SAJA YANG DIUBAH: Questions by Category with Grouping */}
+        {/* Questions by Category - DESIGN TIDAK DIUBAH, LOGIC DIOPTIMASI */}
         <div className="space-y-4">
           <h2 className="text-xl font-bold text-[#1E293B]">Daftar Soal per Kategori</h2>
 
