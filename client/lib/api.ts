@@ -8,7 +8,7 @@ const API_URL = import.meta.env.VITE_API_URL ||
 
 console.log('🔗 API URL:', API_URL);
 
-// ✅ ADD: Cache system
+// ✅ Cache system
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
@@ -61,10 +61,34 @@ class APICache {
 
 const apiCache = new APICache();
 
+// ✅ NEW: Helper untuk timeout
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number = 5000,
+  operation: string = 'Operation'
+): Promise<T> {
+  let timeoutHandle: NodeJS.Timeout;
+
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error(`${operation} timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timeoutHandle);
+    return result;
+  } catch (error) {
+    clearTimeout(timeoutHandle);
+    throw error;
+  }
+}
+
 /**
  * Make API call with authentication (TRYOUT ENDPOINTS - /tryouts prefix)
  */
-async function apiCall(endpoint: string, options: RequestInit = {}) {
+async function apiCall(endpoint: string, options: RequestInit = {}, timeoutMs: number = 10000) {
   try {
     // ✅ Get session
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -104,14 +128,19 @@ async function apiCall(endpoint: string, options: RequestInit = {}) {
     console.log('🔄 API Call:', url);
     console.log('🔑 Token (first 20 chars):', finalSession.access_token.substring(0, 20) + '...');
     
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${finalSession.access_token}`,
-        ...options.headers,
-      },
-    });
+    // ✅ Use timeout wrapper
+    const response = await withTimeout(
+      fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${finalSession.access_token}`,
+          ...options.headers,
+        },
+      }),
+      timeoutMs,
+      `API Call ${endpoint}`
+    );
 
     console.log('📊 Response status:', response.status);
 
@@ -129,6 +158,10 @@ async function apiCall(endpoint: string, options: RequestInit = {}) {
   } catch (error: any) {
     console.error('❌ API Call Failed:', error);
     
+    if (error.message.includes('timeout')) {
+      throw new Error('Server lambat. Coba refresh halaman.');
+    }
+    
     if (error.message === 'Failed to fetch') {
       throw new Error('Tidak dapat terhubung ke server. Pastikan Edge Function sudah di-deploy.');
     }
@@ -143,9 +176,9 @@ async function apiCall(endpoint: string, options: RequestInit = {}) {
 }
 
 /**
- * Make API call WITHOUT /tryouts prefix (untuk kampus, prodi, etc)
+ * Make API call WITHOUT /tryouts prefix (untuk kampus, prodi, dashboard, etc)
  */
-async function apiCallDirect(endpoint: string, options: RequestInit = {}) {
+async function apiCallDirect(endpoint: string, options: RequestInit = {}, timeoutMs: number = 5000) {
   try {
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     
@@ -183,14 +216,19 @@ async function apiCallDirect(endpoint: string, options: RequestInit = {}) {
     console.log('🔄 API Call (Direct):', url);
     console.log('🔑 Token (first 20 chars):', finalSession.access_token.substring(0, 20) + '...');
     
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${finalSession.access_token}`,
-        ...options.headers,
-      },
-    });
+    // ✅ Use timeout wrapper
+    const response = await withTimeout(
+      fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${finalSession.access_token}`,
+          ...options.headers,
+        },
+      }),
+      timeoutMs,
+      `API Call ${endpoint}`
+    );
 
     console.log('📊 Response status:', response.status);
 
@@ -208,6 +246,10 @@ async function apiCallDirect(endpoint: string, options: RequestInit = {}) {
   } catch (error: any) {
     console.error('❌ API Call Failed:', error);
     
+    if (error.message.includes('timeout')) {
+      throw new Error('Server lambat. Coba refresh halaman.');
+    }
+    
     if (error.message === 'Failed to fetch') {
       throw new Error('Tidak dapat terhubung ke server. Pastikan Edge Function sudah di-deploy.');
     }
@@ -222,7 +264,7 @@ async function apiCallDirect(endpoint: string, options: RequestInit = {}) {
 }
 
 export const api = {
-  // ✅ STUDENT METHODS (dengan /tryouts prefix)
+  // ✅ STUDENT METHODS
   
   getTryouts: async () => {
     return apiCall('/available');
@@ -308,7 +350,7 @@ export const api = {
     console.log("🔄 Fetching kampus from API (not in cache)...");
     const startTime = Date.now();
     
-    const result = await apiCallDirect('/kampus');
+    const result = await apiCallDirect('/kampus', {}, 5000);
     
     // ✅ Cache the result
     apiCache.set(cacheKey, result);
@@ -332,7 +374,7 @@ export const api = {
     console.log(`🔄 Fetching prodi for kampus ${kampusId} from API (not in cache)...`);
     const startTime = Date.now();
     
-    const result = await apiCallDirect(`/program-studi?kampus_id=${kampusId}`);
+    const result = await apiCallDirect(`/program-studi?kampus_id=${kampusId}`, {}, 5000);
     
     // ✅ Cache the result
     apiCache.set(cacheKey, result);
@@ -345,7 +387,7 @@ export const api = {
    * Get user target for specific tryout (NO CACHE - always fresh)
    */
   getUserTarget: async (tryoutId: string) => {
-    return apiCallDirect(`/user-targets/${tryoutId}`);
+    return apiCallDirect(`/user-targets/${tryoutId}`, {}, 5000);
   },
 
   /**
@@ -362,24 +404,38 @@ export const api = {
     return apiCallDirect('/user-targets', {
       method: 'POST',
       body: JSON.stringify(body),
-    });
+    }, 5000);
+  },
+
+  /**
+   * Get dashboard statistics
+   */
+  getDashboardStats: async () => {
+    return apiCallDirect('/dashboard/stats', {}, 5000); // ✅ 5s timeout
+  },
+
+  /**
+   * Get recent activities (last 3)
+   */
+  getRecentActivities: async () => {
+    return apiCallDirect('/dashboard/activities', {}, 5000); // ✅ 5s timeout
   },
 
   // ✅ ADMIN METHODS (dengan /tryouts prefix)
   
   adminGetTryouts: async () => {
-    return apiCall('/tryouts');
+    return apiCall('/tryouts', {}, 10000);
   },
 
   adminGetTryoutDetail: async (tryoutId: string) => {
-    return apiCall(`/admin/tryouts/${tryoutId}`);
+    return apiCall(`/admin/tryouts/${tryoutId}`, {}, 10000);
   },
 
   adminGetTryoutQuestions: async (tryoutId: string) => {
     const endpoint = `/admin/tryouts/${tryoutId}/questions`;
     console.log("🔄 Fetching questions from:", endpoint);
     
-    return apiCall(endpoint);
+    return apiCall(endpoint, {}, 10000);
   },
 
   adminCreateTryout: async (body: {
@@ -392,33 +448,33 @@ export const api = {
     return apiCall('/tryouts', {
       method: 'POST',
       body: JSON.stringify(body),
-    });
+    }, 10000);
   },
 
   adminUpdateTryout: async (tryoutId: string, body: any) => {
     return apiCall(`/tryouts?id=${tryoutId}`, {
       method: 'PUT',
       body: JSON.stringify(body),
-    });
+    }, 10000);
   },
 
   adminDeleteTryout: async (tryoutId: string) => {
     return apiCall(`/tryouts?id=${tryoutId}`, {
       method: 'DELETE',
-    });
+    }, 10000);
   },
 
   adminBulkInsertQuestions: async (questions: any[]) => {
     return apiCall('/questions', {
       method: 'POST',
       body: JSON.stringify({ questions }),
-    });
+    }, 10000);
   },
 
   adminDeleteQuestions: async (tryoutId: string) => {
     return apiCall(`/questions?tryout_id=${tryoutId}`, {
       method: 'DELETE',
-    });
+    }, 10000);
   },
 
   clearCache: () => {

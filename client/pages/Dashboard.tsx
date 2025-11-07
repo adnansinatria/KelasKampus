@@ -1,10 +1,10 @@
-// src/pages/Dashboard.tsx
-
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FileText, CheckCircle, Clock, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
+import { api } from "@/lib/api"; //
+import { toast } from "react-hot-toast";
 import Header from "@/components/Header";
 
 interface UserProfile {
@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [activities, setActivities] = useState<any[]>([]);
   const [tryoutCount, setTryoutCount] = useState<number | null>(null);
   const [userPhoto, setUserPhoto] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true); // ✅ ADD: Loading state
 
   useEffect(() => {
     loadDashboardData();
@@ -34,6 +35,10 @@ export default function Dashboard() {
 
   const loadDashboardData = async () => {
     try {
+      setIsLoading(true);
+      console.log("⏱️ [START] Loading dashboard data...");
+      const startTime = Date.now();
+
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       let currentUserId: string | null = null;
@@ -107,122 +112,114 @@ export default function Dashboard() {
 
       setUserId(currentUserId);
 
-      // ✅ Count completed sessions (bukan dari results table)
-      const { count } = await supabase
-        .from("tryout_sessions")
-        .select("id", { head: true, count: "exact" })
-        .eq("user_id", currentUserId)
-        .eq("status", "completed");
-      
-      if (typeof count === "number") setTryoutCount(count);
+      // ✅ CHANGED: Load stats & activities via API (parallel)
+      await Promise.all([
+        fetchDashboardStats(),
+        fetchRecentActivities(),
+      ]);
 
-      // ✅ Fetch real activities from tryout_sessions
-      await fetchRecentActivities(currentUserId);
+      console.log(`⏱️ [END] Dashboard loaded in ${Date.now() - startTime}ms`);
 
     } catch (err) {
       console.error("Gagal mengambil data dashboard:", err);
       localStorage.removeItem("auth_token");
       navigate("/signin", { replace: true });
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // ✅ NEW: Fetch recent activities from tryout_sessions
-  const fetchRecentActivities = async (currentUserId: string) => {
+  // ✅ NEW: Fetch stats via API
+  const fetchDashboardStats = async () => {
     try {
-      const { data: sessionsData, error } = await supabase
-        .from("tryout_sessions")
-        .select(`
-          id,
-          tryout_id,
-          kategori_id,
-          status,
-          started_at,
-          completed_at,
-          score,
-          total_correct,
-          total_questions,
-          tryouts!inner(nama_tryout)
-        `)
-        .eq("user_id", currentUserId)
-        .not('kategori_id', 'is', null)
-        .order("started_at", { ascending: false })
-        .limit(3);
+      console.log("📊 Fetching dashboard stats via API...");
+      const startTime = Date.now();
 
-      if (error) {
-        console.error("Error fetching activities:", error);
-        return;
+      const response = await api.getDashboardStats();
+      const data = response?.data || response;
+
+      if (data && typeof data.completed_count === 'number') {
+        setTryoutCount(data.completed_count);
+        console.log(`✅ Stats loaded in ${Date.now() - startTime}ms:`, data);
       }
-
-      const rows = sessionsData ?? [];
+    } catch (err: any) {
+      console.error("❌ Error fetching stats:", err);
       
-      // ✅ Fetch answer counts for each session
-      const sessionIds = rows.map((r: any) => r.id);
-      const { data: answersData } = await supabase
-        .from("answers")
-        .select("session_id, selected_answer")
-        .in("session_id", sessionIds);
+      // ✅ Fallback: Set to 0 instead of breaking UI
+      setTryoutCount(0);
+      
+      // ✅ Show user-friendly message
+      if (err.message === 'Request timeout') {
+        toast.error('Server lambat. Coba refresh halaman.');
+      }
+    }
+  };
 
-      // Count answered questions per session
-      const answerCounts: Record<string, number> = {};
-      answersData?.forEach((answer: any) => {
-        if (answer.selected_answer) {
-          answerCounts[answer.session_id] = (answerCounts[answer.session_id] || 0) + 1;
-        }
-      });
+  // ✅ NEW: Fetch activities via API
+  const fetchRecentActivities = async () => {
+    try {
+      console.log("📋 Fetching recent activities via API...");
+      const startTime = Date.now();
 
-      const mapped = rows.map((session: any) => {
-        const tryoutName = session.tryouts?.nama_tryout || "Tryout";
-        const kategoriName = session.kategori_id ? ` - ${getKategoriName(session.kategori_id)}` : "";
-        const title = `${tryoutName}${kategoriName}`;
-        
-        const date = humanizeDate(session.started_at || session.completed_at);
-        const status = session.status === 'completed' ? "Selesai" : "Berlangsung";
-        
-        let score = "";
-        if (session.status === 'completed' && session.score !== null) {
-          score = `Skor: ${session.score}`;
-        } else {
-          // ✅ Use real-time answer count
-          const answeredCount = answerCounts[session.id] || 0;
-          const totalQuestions = session.total_questions || 0;
+      const response = await api.getRecentActivities();
+      const data = response?.data || response;
+
+      if (Array.isArray(data)) {
+        const mapped = data.map((session: any) => {
+          const tryoutName = session.tryout_name || "Tryout";
+          const kategoriName = session.kategori_id ? ` - ${getKategoriName(session.kategori_id)}` : "";
+          const title = `${tryoutName}${kategoriName}`;
           
-          if (totalQuestions > 0) {
-            const progress = Math.round((answeredCount / totalQuestions) * 100);
-            score = `Progress: ${progress}%`;
+          const date = humanizeDate(session.started_at || session.completed_at);
+          const status = session.status === 'completed' ? "Selesai" : "Berlangsung";
+          
+          let score = "";
+          if (session.status === 'completed' && session.score !== null) {
+            score = `Skor: ${session.score}`;
+          } else {
+            const answeredCount = session.answered_count || 0;
+            const totalQuestions = session.total_questions || 0;
+            
+            if (totalQuestions > 0) {
+              const progress = Math.round((answeredCount / totalQuestions) * 100);
+              score = `Progress: ${progress}%`;
+            }
           }
-        }
 
-        const iconBg = status === "Selesai" 
-          ? "linear-gradient(135deg, rgba(0, 0, 0, 0.00) 0%, #A4F4CF 100%)" 
-          : "linear-gradient(135deg, rgba(0, 0, 0, 0.00) 0%, #FFD6A7 100%)";
+          const iconBg = status === "Selesai" 
+            ? "linear-gradient(135deg, rgba(0, 0, 0, 0.00) 0%, #A4F4CF 100%)" 
+            : "linear-gradient(135deg, rgba(0, 0, 0, 0.00) 0%, #FFD6A7 100%)";
+          
+          const icon = status === "Selesai" 
+            ? <CheckCircle className="w-5 h-5 text-[#334155]" /> 
+            : <Clock className="w-5 h-5 text-[#334155]" />;
+          
+          const action = status === "Selesai" ? "Review Hasil" : "Lanjutkan";
+          
+          return {
+            id: session.session_id,
+            tryoutId: session.tryout_id,
+            sessionId: session.session_id,
+            kategoriId: session.kategori_id,
+            title,
+            date,
+            status,
+            score,
+            icon,
+            action,
+            iconBg,
+            statusColor: status === "Selesai" 
+              ? "bg-[#89B1C7]" 
+              : "bg-[#F3F4F6] border border-[#E5E7EB] text-[#314158]",
+          };
+        });
         
-        const icon = status === "Selesai" 
-          ? <CheckCircle className="w-5 h-5 text-[#334155]" /> 
-          : <Clock className="w-5 h-5 text-[#334155]" />;
-        
-        const action = status === "Selesai" ? "Review Hasil" : "Lanjutkan";
-        
-        return {
-          id: session.id,
-          tryoutId: session.tryout_id,
-          sessionId: session.id,
-          kategoriId: session.kategori_id,
-          title,
-          date,
-          status,
-          score,
-          icon,
-          action,
-          iconBg,
-          statusColor: status === "Selesai" 
-            ? "bg-[#89B1C7]" 
-            : "bg-[#F3F4F6] border border-[#E5E7EB] text-[#314158]",
-        };
-      });
-      
-      setActivities(mapped);
+        setActivities(mapped);
+        console.log(`✅ Activities loaded in ${Date.now() - startTime}ms:`, mapped);
+      }
     } catch (err) {
-      console.error("Error fetching activities:", err);
+      console.error("❌ Error fetching activities:", err);
+      setActivities([]);
     }
   };
 
@@ -256,12 +253,8 @@ export default function Dashboard() {
   // ✅ Handle activity click
   const handleActivityClick = (activity: any) => {
     if (activity.status === "Selesai") {
-      // Redirect to result page (jika ada)
-      // navigate(`/tryout/${activity.tryoutId}/result?session=${activity.sessionId}`);
-      // Untuk sekarang, redirect ke TryoutStart
       navigate(`/tryout/${activity.tryoutId}/start`);
     } else {
-      // Continue exam
       const params = new URLSearchParams();
       params.set('session', activity.sessionId);
       if (activity.kategoriId) params.set('kategori', activity.kategoriId);
@@ -269,7 +262,7 @@ export default function Dashboard() {
     }
   };
 
-  if (!user) {
+  if (!user || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#EFF6FB]">
         <div className="text-center">
@@ -374,7 +367,7 @@ export default function Dashboard() {
             </div>
           </div>
           
-          {/* Tryout Info Box - FIXED LAYOUT */}
+          {/* Tryout Info Box */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col" style={{ minHeight: '340px' }}>
             <div className="flex-1 flex flex-col items-center justify-center px-8 pt-12 pb-6">
               <div className="w-24 h-24 rounded-[28px] bg-gradient-to-br from-[#E8F1F8] to-[#F8FBFF] shadow-sm flex items-center justify-center mb-6">
