@@ -1,15 +1,24 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FileText, CheckCircle, Clock, ArrowRight } from "lucide-react";
+import { FileText, CheckCircle, Clock, ArrowRight, ShoppingCart } from "lucide-react"; // ✅ ADD ShoppingCart
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
-import { api } from "@/lib/api"; //
+import { api } from "@/lib/api";
 import { toast } from "react-hot-toast";
 import Header from "@/components/Header";
 
 interface UserProfile {
   nama: string;
   inisial: string;
+}
+
+// ✅ ADD: Transaction interface
+interface Transaction {
+  id: string;
+  package_name: string;
+  amount: number;
+  status: string;
+  created_at: string;
 }
 
 const decodeToken = (jwt: string) => {
@@ -27,7 +36,8 @@ export default function Dashboard() {
   const [activities, setActivities] = useState<any[]>([]);
   const [tryoutCount, setTryoutCount] = useState<number | null>(null);
   const [userPhoto, setUserPhoto] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true); // ✅ ADD: Loading state
+  const [isLoading, setIsLoading] = useState(true);
+  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]); // ✅ ADD
 
   useEffect(() => {
     loadDashboardData();
@@ -84,7 +94,6 @@ export default function Dashboard() {
           return;
         }
 
-        // Get user_id from users table
         const { data: userData, error: userError } = await supabase
           .from("users")
           .select("user_id, nama_lengkap, photo_profile")
@@ -112,10 +121,11 @@ export default function Dashboard() {
 
       setUserId(currentUserId);
 
-      // ✅ CHANGED: Load stats & activities via API (parallel)
+      // Load stats, activities, and transactions
       await Promise.all([
         fetchDashboardStats(),
         fetchRecentActivities(),
+        loadRecentTransactions(currentUserId), // ✅ ADD
       ]);
 
       console.log(`⏱️ [END] Dashboard loaded in ${Date.now() - startTime}ms`);
@@ -129,7 +139,6 @@ export default function Dashboard() {
     }
   };
 
-  // ✅ NEW: Fetch stats via API
   const fetchDashboardStats = async () => {
     try {
       console.log("📊 Fetching dashboard stats via API...");
@@ -144,18 +153,14 @@ export default function Dashboard() {
       }
     } catch (err: any) {
       console.error("❌ Error fetching stats:", err);
-      
-      // ✅ Fallback: Set to 0 instead of breaking UI
       setTryoutCount(0);
       
-      // ✅ Show user-friendly message
       if (err.message === 'Request timeout') {
         toast.error('Server lambat. Coba refresh halaman.');
       }
     }
   };
 
-  // ✅ NEW: Fetch activities via API
   const fetchRecentActivities = async () => {
     try {
       console.log("📋 Fetching recent activities via API...");
@@ -223,7 +228,67 @@ export default function Dashboard() {
     }
   };
 
-  // Helper to get kategori name
+  // ✅ ADD: Load recent transactions
+  const loadRecentTransactions = async (currentUserId: string | null) => {
+    try {
+      console.log('🔍 Fetching recent transactions...');
+
+      if (!currentUserId) {
+        console.warn('⚠️ User ID not found');
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('transactions')
+        .select(`
+          *,
+          packages:package_id (
+            name,
+            price
+          )
+        `)
+        .eq('user_id', currentUserId)
+        .order('created_at', { ascending: false })
+        .limit(3); // Show only 3 latest
+
+      if (error) {
+        console.error('❌ Transactions error:', error);
+        return;
+      }
+
+      const transformed = (data || []).map((t: any) => ({
+        id: t.id,
+        package_name: t.packages?.name || '-',
+        amount: t.amount,
+        status: t.status,
+        created_at: t.created_at
+      }));
+
+      console.log('✅ Recent transactions loaded:', transformed);
+      setRecentTransactions(transformed);
+
+    } catch (error) {
+      console.error('❌ Error loading transactions:', error);
+    }
+  };
+
+  // ✅ ADD: Format helpers
+  const formatPrice = (price: number) => {
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0,
+    }).format(price);
+  };
+
+  const formatDate = (dateStr: string) => {
+    return new Date(dateStr).toLocaleDateString('id-ID', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+  };
+
   const getKategoriName = (kategoriId: string): string => {
     const kategoriMap: Record<string, string> = {
       'kpu': 'Kemampuan Penalaran Umum',
@@ -250,7 +315,6 @@ export default function Dashboard() {
     }
   }
 
-  // ✅ Handle activity click
   const handleActivityClick = (activity: any) => {
     if (activity.status === "Selesai") {
       navigate(`/tryout/${activity.tryoutId}/start`);
@@ -292,7 +356,10 @@ export default function Dashboard() {
             <p className="text-xs md:text-sm text-white/90 mb-3">
               Siap lanjut tryout hari ini? Mari mulai persiapan UTBK terbaikmu!
             </p>
-            <Button className="bg-white text-[#89B0C7] font-semibold px-4 py-1.5 text-sm rounded-xl shadow-md hover:bg-white/95">
+            <Button 
+              onClick={() => navigate('/packages')}
+              className="bg-white text-[#89B0C7] font-semibold px-4 py-1.5 text-sm rounded-xl shadow-md hover:bg-white/95 transition-all"
+            >
               Beli Paket
             </Button>
           </div>
@@ -319,74 +386,88 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Activity & Tryout Info */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-          <div className="lg:col-span-2 space-y-3">
-            <h3 className="text-base md:text-lg font-bold text-[#1D293D]">Aktivitas Terakhir</h3>
-            <div className="space-y-3">
-              {activities.length > 0 ? (
-                activities.map((activity) => (
-                  <div 
-                    key={activity.id} 
-                    className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 flex items-center justify-between"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div 
-                        className="w-10 h-10 rounded-xl shadow-sm flex items-center justify-center" 
-                        style={{ background: activity.iconBg }}
-                      >
-                        {activity.icon}
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold text-[#1D293D] mb-0.5">{activity.title}</h4>
-                        <div className="flex items-center gap-2 text-xs">
-                          <span className="text-[#62748E]">{activity.date}</span>
-                          <span className={`px-2 py-0.5 rounded-lg text-[10px] ${activity.statusColor}`}>
-                            {activity.status}
-                          </span>
-                          {activity.score && (
-                            <span className="text-[#314158] font-semibold">{activity.score}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => handleActivityClick(activity)}
-                      className="flex items-center gap-1 text-xs text-[#89B0C7] font-medium hover:underline"
-                    >
-                      {activity.action}
-                      <ArrowRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center text-gray-500 text-sm">
-                  Belum ada aktivitas. Mulai tryout pertamamu!
+        {/* ✅ MODIFIED: Activity & Purchase History (2 columns) */}
+        {/* ✅ MODIFIED: Activity & Purchase History (vertical stacking) */}
+<div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+  {/* Left Column: Aktivitas Terakhir + Purchase History (stacked vertically) */}
+  <div className="lg:col-span-2 space-y-4">
+    {/* Aktivitas Terakhir */}
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-base md:text-lg font-bold text-[#1D293D]">Aktivitas Terakhir</h3>
+        <button 
+          onClick={() => navigate('/tryout')}
+          className="text-xs text-[#89B0C7] font-medium hover:underline"
+        >
+          Lihat Semua
+        </button>
+      </div>
+      <div className="space-y-3">
+        {activities.length > 0 ? (
+          activities.map((activity) => (
+            <div 
+              key={activity.id} 
+              className="bg-white rounded-xl shadow-sm border border-gray-100 p-3 flex items-center justify-between"
+            >
+              <div className="flex items-center gap-3">
+                <div 
+                  className="w-10 h-10 rounded-xl shadow-sm flex items-center justify-center" 
+                  style={{ background: activity.iconBg }}
+                >
+                  {activity.icon}
                 </div>
-              )}
-            </div>
-          </div>
-          
-          {/* Tryout Info Box */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col" style={{ minHeight: '340px' }}>
-            <div className="flex-1 flex flex-col items-center justify-center px-8 pt-12 pb-6">
-              <div className="w-24 h-24 rounded-[28px] bg-gradient-to-br from-[#E8F1F8] to-[#F8FBFF] shadow-sm flex items-center justify-center mb-6">
-                <FileText className="w-11 h-11 text-[#6B94B5] stroke-[1.5]" />
+                <div>
+                  <h4 className="text-sm font-semibold text-[#1D293D] mb-0.5">{activity.title}</h4>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="text-[#62748E]">{activity.date}</span>
+                    <span className={`px-2 py-0.5 rounded-lg text-[10px] ${activity.statusColor}`}>
+                      {activity.status}
+                    </span>
+                    {activity.score && (
+                      <span className="text-[#314158] font-semibold">{activity.score}</span>
+                    )}
+                  </div>
+                </div>
               </div>
-              <p className="text-base text-[#64748B] leading-relaxed font-normal text-center">
-                Lihat dan mulai tryout terbaru
-              </p>
-            </div>
-            <div className="px-8 pb-8">
-              <Button 
-                onClick={() => navigate('/tryout')}
-                className="w-full bg-[#295782] hover:bg-[#234668] text-white font-semibold text-base rounded-xl py-4 shadow-md transition-all hover:shadow-lg"
+              <button 
+                onClick={() => handleActivityClick(activity)}
+                className="flex items-center gap-1 text-xs text-[#89B0C7] font-medium hover:underline"
               >
-                Lihat Semua Tryout
-              </Button>
+                {activity.action}
+                <ArrowRight className="w-3 h-3" />
+              </button>
             </div>
+          ))
+        ) : (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center text-gray-500 text-sm">
+            Belum ada aktivitas. Mulai tryout pertamamu!
           </div>
-        </div>
+        )}
+      </div>
+    </div>
+  </div>
+  
+  {/* Right Column: Tryout Info Box */}
+  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden flex flex-col" style={{ minHeight: '340px' }}>
+    <div className="flex-1 flex flex-col items-center justify-center px-8 pt-12 pb-6">
+      <div className="w-24 h-24 rounded-[28px] bg-gradient-to-br from-[#E8F1F8] to-[#F8FBFF] shadow-sm flex items-center justify-center mb-6">
+        <FileText className="w-11 h-11 text-[#6B94B5] stroke-[1.5]" />
+      </div>
+      <p className="text-base text-[#64748B] leading-relaxed font-normal text-center">
+        Lihat dan mulai tryout terbaru
+      </p>
+    </div>
+    <div className="px-8 pb-8">
+      <Button 
+        onClick={() => navigate('/tryout')}
+        className="w-full bg-[#295782] hover:bg-[#234668] text-white font-semibold text-base rounded-xl py-4 shadow-md transition-all hover:shadow-lg"
+      >
+        Lihat Semua Tryout
+      </Button>
+    </div>
+  </div>
+</div>
+
       </main>
 
       {/* Footer */}
