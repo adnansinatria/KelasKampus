@@ -1,5 +1,4 @@
 // src/main.tsx
-
 import "./global.css";
 import { Toaster as Toaster1 } from "@/components/ui/toaster";
 import { createRoot } from "react-dom/client";
@@ -10,20 +9,30 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import { Toaster } from "react-hot-toast";
 
+// Public Pages
 import Index from "./pages/Index";
-import ProtectedRoute from "./components/ProtectedRoute"; // ✅ IMPORT
+import ProtectedRoute from "./components/ProtectedRoute";
 import AuthCallback from "./pages/AuthCallback";
 
 // Auth Pages
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
-
 import ForgotPassword from "./pages/ForgotPassword";
+
+// Student Pages
 import Dashboard from "./pages/Dashboard";
 import TryoutList from "./pages/TryoutList";
 import TryoutStart from "./pages/TryoutStart";
 import TryoutExam from "./pages/TryoutExam";
+import TryoutResult from "./pages/TryoutResult"; // ✅ NEW
+import Profile from "./pages/Profile";
 
+// Package Pages
+import PackageList from "./pages/PackageList";
+import PackageCheckout from "./pages/PackageCheckout";
+import PaymentInstruction from "./pages/PaymentInstruction";
+
+// Admin Pages
 import AdminDashboard from "./pages/admin/adminDashboard";
 import AdminUser from "./pages/admin/AdminUser";
 import AdminTransaksi from "./pages/admin/adminPaketTransaksi";
@@ -33,7 +42,8 @@ import AddTryoutPage from "./pages/admin/AddTryout";
 import AddQuestionPage from "./pages/admin/AddQuestionPage";
 import ViewTryout from "./pages/admin/ViewTryout";
 import EditTryout from "./pages/admin/EditTryout";
-import Profile from "./pages/Profile";
+
+// 404
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -48,14 +58,20 @@ const App = () => (
         <Toaster position="top-right" />
         <BrowserRouter>
           <Routes>
-            {/* Public Routes */}
+            {/* ========================================
+                PUBLIC ROUTES
+            ======================================== */}
             <Route path="/" element={<Index />} />
             <Route path="/signin" element={<SignIn />} />
             <Route path="/signup" element={<SignUp />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
 
-            {/* ✅ Student Dashboard (Protected - Siswa Only) */}
+            {/* ========================================
+                STUDENT ROUTES (Protected - Siswa Only)
+            ======================================== */}
+            
+            {/* Dashboard */}
             <Route 
               path="/dashboard" 
               element={
@@ -65,6 +81,7 @@ const App = () => (
               } 
             />
 
+            {/* Tryout Routes */}
             <Route 
               path="/tryout" 
               element={
@@ -77,7 +94,7 @@ const App = () => (
             <Route
               path="/tryout/:tryoutId/start"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRole="siswa">
                   <TryoutStart />
                 </ProtectedRoute>
               }
@@ -86,13 +103,65 @@ const App = () => (
             <Route
               path="/tryout/:tryoutId/exam"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredRole="siswa">
                   <TryoutExam />
                 </ProtectedRoute>
               }
             />
 
-            {/* ✅ Admin Routes (Protected - Admin Only) */}
+            {/* ✅ NEW: Tryout Result Route */}
+            <Route
+              path="/tryout/:tryoutId/result"
+              element={
+                <ProtectedRoute requiredRole="siswa">
+                  <TryoutResult />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Package Routes */}
+            <Route
+              path="/packages"
+              element={
+                <ProtectedRoute requiredRole="siswa">
+                  <PackageList />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/packages/:id/checkout"
+              element={
+                <ProtectedRoute requiredRole="siswa">
+                  <PackageCheckout />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/packages/payment-instruction"
+              element={
+                <ProtectedRoute requiredRole="siswa">
+                  <PaymentInstruction />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Profile */}
+            <Route 
+              path="/profile" 
+              element={
+                <ProtectedRoute requiredRole="siswa">
+                  <Profile />
+                </ProtectedRoute>
+              } 
+            />
+
+            {/* ========================================
+                ADMIN ROUTES (Protected - Admin Only)
+            ======================================== */}
+            
+            {/* Admin Dashboard */}
             <Route 
               path="/admin" 
               element={
@@ -102,6 +171,7 @@ const App = () => (
               } 
             />
 
+            {/* Admin User Management */}
             <Route 
               path="/admin-users" 
               element={
@@ -111,6 +181,7 @@ const App = () => (
               } 
             />
 
+            {/* Admin Transaction Management */}
             <Route 
               path="/admin-transaksi" 
               element={
@@ -120,6 +191,7 @@ const App = () => (
               } 
             />
 
+            {/* Admin Tryout Management */}
             <Route 
               path="/admin-tryout" 
               element={
@@ -165,6 +237,7 @@ const App = () => (
               } 
             />
 
+            {/* Admin Settings */}
             <Route 
               path="/admin-pengaturan" 
               element={
@@ -174,16 +247,9 @@ const App = () => (
               } 
             />
 
-            <Route 
-              path="/profile" 
-              element={
-                <ProtectedRoute requiredRole="siswa">
-                  <Profile />
-                </ProtectedRoute>
-              } 
-            />
-
-            {/* 404 */}
+            {/* ========================================
+                404 NOT FOUND
+            ======================================== */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

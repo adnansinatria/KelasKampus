@@ -1,3 +1,6 @@
+// pages/TryoutExam.tsx
+// ✅ FINAL VERSION - Handler sudah sesuai dengan QuestionDisplay props
+
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Flag } from 'lucide-react';
@@ -31,11 +34,12 @@ export default function TryoutExam() {
     isLoading,
     timeRemaining,
     tryoutId: examTryoutId,
+    isSaving,
     bookmarkedQuestions,
     saveBookmarks
   } = useExamSession(sessionId || '', kategoriId || undefined);
 
-  // ✅ Fetch current user (with empty dependency array)
+  // ✅ Fetch current user
   useEffect(() => {
     fetchCurrentUser();
   }, []);
@@ -85,24 +89,40 @@ export default function TryoutExam() {
     try {
       await submitExam();
       toast.success('Tryout berhasil disubmit!');
-      navigate(`/tryout/${tryoutId}/start`);
+      navigate(`/tryout/${tryoutId}/result?session=${sessionId}`);
     } catch (err) {
       toast.error('Gagal submit tryout');
     }
   };
 
-  // ✅ FIXED: Save bookmarks before exit
+  // ✅ CRITICAL FIX: Handler yang sesuai dengan QuestionDisplay props
+  // QuestionDisplay expects: onAnswerSelect: (answer: string) => void
+  // Hanya terima 1 parameter (answer key), bukan questionId
+  const handleAnswerSelect = (answer: string) => {
+    if (!currentQuestion) {
+      console.error('❌ No current question');
+      return;
+    }
+
+    console.log('✅ Answer selected:', answer, 'for question ID:', currentQuestion.id);
+    
+    // ✅ Call saveAnswer dari hook dengan question.id
+    saveAnswer(currentQuestion.id, answer);
+  };
+
+  // Get current question
+  const currentQuestion = questions[currentIndex];
+
+  // ✅ Exit handler
   const handleExit = async () => {
     console.log('🚪 Exit button clicked');
 
     try {
-      // ✅ Save bookmarks DULU sebelum exit
       if (bookmarkedQuestions.length > 0) {
         console.log('💾 Saving bookmarks before exit:', bookmarkedQuestions);
         await saveBookmarks(bookmarkedQuestions);
       }
 
-      // ✅ Then save time remaining
       await supabase
         .from('tryout_sessions')
         .update({
@@ -117,11 +137,10 @@ export default function TryoutExam() {
       toast.error('Gagal menyimpan progress');
     }
 
-    // Navigate back to TryoutStart
     navigate(`/tryout/${tryoutId}/start`);
   };
 
-  // ✅ FIXED: Toggle bookmark with async
+  // ✅ Toggle bookmark
   const handleToggleBookmark = async () => {
     let updated: number[];
 
@@ -133,7 +152,6 @@ export default function TryoutExam() {
       toast.success('Soal ditandai');
     }
 
-    // Save to backend via API
     await saveBookmarks(updated);
   };
 
@@ -146,16 +164,6 @@ export default function TryoutExam() {
   const handleNext = () => {
     if (currentIndex < questions.length - 1) {
       setCurrentIndex(currentIndex + 1);
-    }
-  };
-
-  // Get current question
-  const currentQuestion = questions[currentIndex];
-
-  // Handle answer select
-  const handleAnswerChange = (answer: string) => {
-    if (currentQuestion) {
-      saveAnswer(currentQuestion.id, answer);
     }
   };
 
@@ -219,7 +227,7 @@ export default function TryoutExam() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-50/30 to-white">
-      {/* Header Component dengan User Info */}
+      {/* Header Component */}
       <Header
         userName={currentUser?.username || currentUser?.nama_lengkap || 'User'}
         userPhoto={currentUser?.photo_profile}
@@ -281,16 +289,17 @@ export default function TryoutExam() {
         <div className="flex flex-col lg:flex-row gap-5">
           {/* Main Question Area */}
           <div className="flex-1">
+            {/* ✅ CRITICAL FIX: Passing props yang PERSIS sesuai dengan QuestionDisplay interface */}
             <QuestionDisplay
               question={currentQuestion}
               selectedAnswer={answers[currentQuestion.id]}
-              onAnswerSelect={handleAnswerChange}
-              isSaving={false}
+              onAnswerSelect={handleAnswerSelect}
+              isSaving={isSaving}
             />
 
             {/* Navigation Buttons */}
             <div className="mt-8 pt-6 border-t border-gray-200 flex flex-col sm:flex-row justify-between gap-4">
-              {/* Tombol Sebelumnya - Hanya muncul jika bukan soal pertama */}
+              {/* Tombol Sebelumnya */}
               {currentIndex > 0 && (
                 <button
                   onClick={handlePrevious}
@@ -313,7 +322,7 @@ export default function TryoutExam() {
                 </button>
               )}
 
-              {/* Spacer untuk menjaga posisi tombol kanan */}
+              {/* Spacer */}
               {currentIndex === 0 && <div></div>}
 
               {/* Tombol Selanjutnya atau Selesai */}
