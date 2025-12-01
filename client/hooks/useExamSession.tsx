@@ -1,3 +1,4 @@
+// hooks/useExamSession.ts - UPDATED WITH IMAGE SUPPORT
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
@@ -8,9 +9,10 @@ interface Question {
   opsi_a: string;       
   opsi_b: string;       
   opsi_c: string;       
-  opsi_d: string;y
+  opsi_d: string;
   urutan: number;
   jawaban_benar: string;
+  image_url?: string | null; // ✅ ADD THIS
 }
 
 interface Answer {
@@ -85,7 +87,7 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
     }
   }, [timeRemaining, isLoading, updateTimer, handleAutoSubmit]);
 
-  // ✅ Fetch session data via API
+  // ✅ Fetch session data via API (WITH IMAGE SUPPORT)
   const fetchSessionData = async () => {
     try {
       setIsLoading(true);
@@ -112,8 +114,29 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
       const questionData = questionsResponse?.questions || questionsResponse;
 
       if (Array.isArray(questionData)) {
-        setQuestions(questionData);
-        console.log(`✅ Questions loaded: ${questionData.length}`);
+        // ✅ Map questions to include image_url
+        const questionsWithImages = questionData.map((q: any) => ({
+          id: q.id,
+          soal_text: q.soal_text,
+          opsi_a: q.opsi_a,
+          opsi_b: q.opsi_b,
+          opsi_c: q.opsi_c,
+          opsi_d: q.opsi_d,
+          urutan: q.urutan,
+          jawaban_benar: q.jawaban_benar,
+          image_url: q.image_url || null, // ✅ Include image URL
+        }));
+
+        setQuestions(questionsWithImages);
+        console.log(`✅ Questions loaded: ${questionsWithImages.length}`);
+        
+        // ✅ Log images for debugging
+        const questionsWithImage = questionsWithImages.filter(q => q.image_url);
+        if (questionsWithImage.length > 0) {
+          console.log(`🖼️ Questions with images: ${questionsWithImage.length}`, 
+            questionsWithImage.map(q => ({ id: q.id, url: q.image_url }))
+          );
+        }
       } else {
         console.warn('⚠️ Questions is not array:', questionData);
       }

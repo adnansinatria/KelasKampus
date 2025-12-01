@@ -15,6 +15,7 @@ interface TryoutProgress {
   questions_answered: number;
   total_questions: number;
   score?: number | null;
+  session_id?: string;
 }
 
 interface Tryout {
@@ -72,7 +73,6 @@ export default function TryoutList() {
     }
   };
 
-  // ✅ CHANGED: Menggunakan API call instead of hardcode database
   const fetchTryouts = async () => {
     try {
       setIsLoading(true);
@@ -83,8 +83,8 @@ export default function TryoutList() {
       const response = await api.getTryouts();
       
       console.log('✅ API Response:', response);
+      console.log('✅ First tryout progress:', response?.data?.[0]?.progress); // ✅ ADD THIS
 
-      // ✅ SIMPLIFIED: Direct access since no nesting
       const tryoutsData = Array.isArray(response?.data) ? response.data : [];
       
       setTryouts(tryoutsData);
@@ -182,8 +182,54 @@ export default function TryoutList() {
     return 'Review Hasil';
   };
 
-  const handleStartTryout = (tryoutId: string) => {
-    navigate(`/tryout/${tryoutId}/start`);
+  const handleStartTryout = async (tryout: Tryout) => {
+    // ✅ Debug log
+    console.log('🔍 Tryout clicked:', {
+      id: tryout.id,
+      status: tryout.progress.status,
+      session_id: tryout.progress.session_id,
+      full_progress: tryout.progress
+    });
+
+    if (tryout.progress.status === 'completed') {
+      // ✅ Try multiple possible field names
+      const sessionId = tryout.progress.session_id || 
+                        (tryout.progress as any).sessionId || 
+                        (tryout as any).session_id;
+
+      if (sessionId) {
+        console.log('✅ Navigating to result with session:', sessionId);
+        navigate(`/tryout/${tryout.id}/result?session=${sessionId}`);
+      } else {
+        console.warn('⚠️ Session ID not found, fetching from database...');
+        
+        // ✅ Fallback: fetch from database
+        const { data: { session: authSession } } = await supabase.auth.getSession();
+        const { data: userData } = await supabase
+          .from('users')
+          .select('user_id')
+          .eq('auth_id', authSession?.user.id)
+          .single();
+
+        const { data: sessionData } = await supabase
+          .from('tryout_sessions')
+          .select('id')
+          .eq('tryout_id', tryout.id)
+          .eq('user_id', userData?.user_id)
+          .eq('status', 'completed')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (sessionData) {
+          navigate(`/tryout/${tryout.id}/result?session=${sessionData.id}`);
+        } else {
+          toast.error('Session tidak ditemukan');
+        }
+      }
+    } else {
+      navigate(`/tryout/${tryout.id}/start`);
+    }
   };
 
   if (isLoading) {
@@ -386,7 +432,7 @@ export default function TryoutList() {
                 </div>
 
                 <button
-                  onClick={() => handleStartTryout(tryout.id)}
+                  onClick={() => handleStartTryout(tryout)} // ✅ CHANGE: Pass entire tryout object
                   className="w-full bg-gradient-to-r from-[#295782] to-[#295782] text-white px-4 py-2.5 rounded-xl text-[13px] font-semibold shadow-lg hover:shadow-xl transition-all hover:scale-[1.02]"
                 >
                   {getButtonText(tryout.progress)}

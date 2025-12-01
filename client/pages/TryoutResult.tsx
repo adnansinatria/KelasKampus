@@ -1,6 +1,4 @@
-// pages/TryoutResult.tsx
-// ✅ FINAL VERSION - Match UI screenshot + Direct Supabase pattern
-
+// pages/TryoutResult.tsx - FULL CODE WITH IMAGE SUPPORT
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Trophy, Target, Clock, BarChart3, RefreshCw, Home } from 'lucide-react';
@@ -31,6 +29,7 @@ interface QuestionResult {
   isCorrect: boolean;
   topic: string;
   soal_text: string;
+  image_url?: string | null; // ✅ ADD THIS
 }
 
 interface TopicStats {
@@ -99,7 +98,7 @@ export default function TryoutResult() {
     }
   };
 
-  // ✅ PATTERN DARI ADMIN: Direct Supabase access (seperti ViewTryout.tsx)
+  // ✅ PATTERN DARI ADMIN: Direct Supabase access (WITH IMAGE SUPPORT)
   const fetchResultData = async () => {
     try {
       setIsLoading(true);
@@ -129,10 +128,10 @@ export default function TryoutResult() {
       console.log('✅ Tryout data:', tryout);
       setTryoutData(tryout);
 
-      // ✅ 3. Fetch questions (DIRECT SUPABASE - Filter by kategori if provided)
+      // ✅ 3. Fetch questions (DIRECT SUPABASE - WITH IMAGE URL)
       let questionsQuery = supabase
         .from('questions')
-        .select('*')
+        .select('id, soal_text, opsi_a, opsi_b, opsi_c, opsi_d, jawaban_benar, kategori_id, urutan, image_url') // ✅ Include image_url
         .eq('tryout_id', session.tryout_id)
         .order('urutan', { ascending: true });
 
@@ -145,6 +144,12 @@ export default function TryoutResult() {
 
       if (questionsError) throw questionsError;
       console.log('✅ Questions loaded:', questionsData?.length || 0);
+
+      // ✅ Log questions with images
+      const questionsWithImage = questionsData?.filter(q => q.image_url) || [];
+      if (questionsWithImage.length > 0) {
+        console.log(`🖼️ Questions with images: ${questionsWithImage.length}`);
+      }
 
       // ✅ 4. Fetch answers (DIRECT SUPABASE)
       const { data: answersData, error: answersError } = await supabase
@@ -162,7 +167,7 @@ export default function TryoutResult() {
 
       console.log('✅ Answers loaded:', Object.keys(answersMap).length);
 
-      // ✅ 5. Process questions with answers
+      // ✅ 5. Process questions with answers (INCLUDING IMAGE_URL)
       const processedQuestions: QuestionResult[] = (questionsData || []).map((q, index) => ({
         id: q.id,
         questionNumber: index + 1,
@@ -170,7 +175,8 @@ export default function TryoutResult() {
         correctAnswer: q.jawaban_benar,
         isCorrect: answersMap[q.id] === q.jawaban_benar,
         topic: q.kategori_id || 'General',
-        soal_text: q.soal_text
+        soal_text: q.soal_text,
+        image_url: q.image_url || null, // ✅ Include image URL
       }));
 
       setQuestions(processedQuestions);
@@ -467,7 +473,7 @@ export default function TryoutResult() {
             </div>
           )}
 
-          {/* Table View */}
+          {/* Table View (WITH IMAGE) */}
           {viewMode === 'table' && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -484,7 +490,20 @@ export default function TryoutResult() {
                   {questions.map((q) => (
                     <tr key={q.id} className="border-b hover:bg-gray-50">
                       <td className="p-3">{q.questionNumber}</td>
-                      <td className="p-3 max-w-md truncate" dangerouslySetInnerHTML={{ __html: q.soal_text.substring(0, 100) + '...' }} />
+                      <td className="p-3 max-w-md">
+                        {/* ✅ NEW: Display image if exists */}
+                        {q.image_url && (
+                          <img
+                            src={q.image_url}
+                            alt={`Soal ${q.questionNumber}`}
+                            className="max-w-xs h-auto max-h-32 rounded border mb-2"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        )}
+                        <span className="line-clamp-2">{q.soal_text.substring(0, 100) + '...'}</span>
+                      </td>
                       <td className="p-3">
                         <span className={`px-2 py-1 rounded ${
                           !q.userAnswer ? 'bg-gray-200 text-gray-600' : 'bg-blue-100 text-blue-700'
