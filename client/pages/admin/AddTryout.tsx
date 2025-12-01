@@ -16,13 +16,6 @@ export default function AddNewTryoutPage() {
     resetTryout
   } = useTryoutStore();
 
-  useEffect(() => {
-    return () => {
-      console.log("🧹 AddTryout unmounting - resetting store");
-      resetTryout();
-    };
-  }, [resetTryout]);
-
   const categories = [
     { 
       name: "Tes Potensi Skolastik", 
@@ -75,7 +68,6 @@ export default function AddNewTryoutPage() {
       console.log("📝 Step 1: Creating tryout via API...");
 
       try {
-        // ✅ Step 1: Create tryout
         const tryoutResponse = await api.adminCreateTryout({
           nama_tryout: tryoutInfo.name,
           tanggal_ujian: tryoutInfo.tanggal,
@@ -89,7 +81,6 @@ export default function AddNewTryoutPage() {
 
         console.log("✅ Step 1: Tryout created with ID:", tryoutId);
 
-        // ✅ Step 2: Insert questions
         console.log("📝 Step 2: Inserting questions via API...");
 
         const questionsToInsert: any[] = [];

@@ -1,8 +1,9 @@
+// ViewTryout.tsx - FULL CODE WITH IMAGE SUPPORT
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, FileText, CheckCircle2, Edit2, ChevronDown } from "lucide-react";
+import { ArrowLeft, FileText, CheckCircle2, Edit2, ChevronDown, Image as ImageIcon } from "lucide-react";
 import toast from "react-hot-toast";
-import { api } from "@/lib/api"; // ✅ CHANGED: Import API
+import { api } from "@/lib/api";
 import AdminLayout from "@/components/admin/AdminLayout";
 
 // ✅ Kategori struktur dengan GROUPING - TIDAK DIUBAH
@@ -191,7 +192,7 @@ export default function ViewTryout() {
           </div>
         </div>
 
-        {/* Questions by Category - DESIGN TIDAK DIUBAH, LOGIC DIOPTIMASI */}
+        {/* Questions by Category - DESIGN TIDAK DIUBAH, TAMBAH IMAGE SUPPORT */}
         <div className="space-y-4">
           <h2 className="text-xl font-bold text-[#1E293B]">Daftar Soal per Kategori</h2>
 
@@ -284,12 +285,37 @@ export default function ViewTryout() {
                                     key={index}
                                     className="p-4 bg-gray-50 rounded-lg border border-gray-200"
                                   >
+                                    {/* Question Number & Text */}
                                     <div className="flex items-start gap-3 mb-3">
                                       <div className="flex-shrink-0 w-6 h-6 rounded-full bg-[#295782] text-white flex items-center justify-center text-xs font-semibold">
                                         {index + 1}
                                       </div>
-                                      <p className="flex-1 text-sm text-[#1E293B]">{question.soal_text}</p>
+                                      <div className="flex-1">
+                                        {/* ✅ NEW: Display Image if exists */}
+                                        {question.image_url && (
+                                          <div className="mb-3">
+                                            <div className="relative inline-block">
+                                              <img
+                                                src={question.image_url}
+                                                alt={`Gambar soal ${index + 1}`}
+                                                className="max-w-full h-auto max-h-64 rounded-lg border border-gray-300"
+                                                onError={(e) => {
+                                                  // Hide image if failed to load
+                                                  e.currentTarget.style.display = 'none';
+                                                }}
+                                              />
+                                            </div>
+                                          </div>
+                                        )}
+                                        
+                                        {/* Question Text */}
+                                        <p className="text-sm text-[#1E293B]">
+                                          {question.soal_text}
+                                        </p>
+                                      </div>
                                     </div>
+
+                                    {/* Options */}
                                     <div className="ml-9 space-y-2">
                                       {["opsi_a", "opsi_b", "opsi_c", "opsi_d"].map((opsi, idx) => (
                                         <div

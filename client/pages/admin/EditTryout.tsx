@@ -1,11 +1,23 @@
-// src/pages/admin/EditTryout.tsx
-
+// src/pages/admin/EditTryout.tsx - FULL CODE WITH IMAGE SUPPORT
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Save } from "lucide-react";
 import useTryoutStore from "../../stores/tryoutStore";
 import toast from "react-hot-toast";
 import { api } from "@/lib/api";
+
+// ✅ Interface for Question with image support
+interface Question {
+  id?: string;
+  question: string;
+  optionA: string;
+  optionB: string;
+  optionC: string;
+  optionD: string;
+  answer: string;
+  image: File | null;
+  image_url: string;
+}
 
 const CATEGORIES = [
   {
@@ -31,11 +43,11 @@ const CATEGORIES = [
 ];
 
 export default function EditTryout() {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("active");
 
   const {
@@ -46,7 +58,7 @@ export default function EditTryout() {
     resetTryout
   } = useTryoutStore();
 
-  // ✅ CHANGED: Fetch tryout data via API
+  // ✅ CHANGED: Fetch tryout data via API with image support
   const fetchTryoutDetail = async () => {
     setIsLoading(true);
     setError(null);
@@ -67,7 +79,7 @@ export default function EditTryout() {
       setTryoutInfo({
         id: tryoutData.id,
         name: tryoutData.nama_tryout,
-        tanggal: tryoutData.tanggal_ujian,
+        tanggal: tryoutData.tanggal_ujian?.split("T")[0] || tryoutData.tanggal_ujian,
       });
 
       setStatus(tryoutData.status || "active");
@@ -85,8 +97,8 @@ export default function EditTryout() {
 
       console.log(`📝 Loaded ${questionsData.length} questions for tryout ${id}`);
 
-      // ✅ Group questions by kategori_id
-      const questionsByKategori: Record<string, any[]> = {};
+      // ✅ Group questions by kategori_id WITH IMAGE SUPPORT
+      const questionsByKategori: Record<string, Question[]> = {};
 
       questionsData.forEach((q: any) => {
         if (!questionsByKategori[q.kategori_id]) {
@@ -94,12 +106,15 @@ export default function EditTryout() {
         }
 
         questionsByKategori[q.kategori_id].push({
-          question: q.soal_text,
-          optionA: q.opsi_a,
-          optionB: q.opsi_b,
-          optionC: q.opsi_c,
-          optionD: q.opsi_d,
-          answer: q.jawaban_benar,
+          id: q.id,
+          question: q.soal_text || "",
+          optionA: q.opsi_a || "",
+          optionB: q.opsi_b || "",
+          optionC: q.opsi_c || "",
+          optionD: q.opsi_d || "",
+          answer: q.jawaban_benar || "",
+          image: null, // ✅ No file object in edit mode
+          image_url: q.image_url || "", // ✅ Load existing image URL
         });
       });
 
@@ -132,7 +147,7 @@ export default function EditTryout() {
       console.log("🧹 Cleanup: Resetting store on unmount");
       resetTryout();
     };
-  }, [id]); // ✅ Dependency pada 'id'
+  }, [id]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -142,7 +157,7 @@ export default function EditTryout() {
     });
   };
 
-  // ✅ CHANGED: Use API to update tryout
+  // ✅ CHANGED: Use API to update tryout WITH IMAGE SUPPORT
   const handleUpdateTryout = async () => {
     if (!tryoutInfo.name || !tryoutInfo.tanggal) {
       toast.error("Nama Tryout dan Tanggal Ujian wajib diisi.");
@@ -172,7 +187,7 @@ export default function EditTryout() {
         console.warn("⚠️ Warning: Failed to delete old questions:", err);
       }
 
-      // ✅ Insert new questions
+      // ✅ Insert new questions WITH IMAGE SUPPORT
       if (Object.keys(questionsByCategory).length > 0) {
         console.log("📝 Step 3: Inserting new questions via API...");
         const questionsToInsert: any[] = [];
@@ -188,6 +203,7 @@ export default function EditTryout() {
               opsi_c: q.optionC,
               opsi_d: q.optionD,
               jawaban_benar: q.answer,
+              image_url: q.image_url || null, // ✅ Include image URL
             });
           });
         });
@@ -245,6 +261,7 @@ export default function EditTryout() {
       <button
         onClick={() => navigate("/admin-tryout")}
         className="flex items-center gap-2 text-sm text-[#295782] hover:underline mb-6"
+        disabled={isSaving}
       >
         <ArrowLeft className="w-4 h-4" />
         Kembali ke Daftar Tryout
@@ -267,7 +284,8 @@ export default function EditTryout() {
               name="name"
               value={tryoutInfo.name}
               onChange={handleInputChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#295782] focus:border-transparent"
+              disabled={isSaving}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#295782] focus:border-transparent disabled:bg-gray-100"
               placeholder="Contoh: Tryout SNBT 2025 #1"
             />
           </div>
@@ -281,7 +299,8 @@ export default function EditTryout() {
               name="tanggal"
               value={tryoutInfo.tanggal}
               onChange={handleInputChange}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#295782] focus:border-transparent"
+              disabled={isSaving}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#295782] focus:border-transparent disabled:bg-gray-100"
             />
           </div>
         </div>
@@ -298,7 +317,8 @@ export default function EditTryout() {
                 value="active"
                 checked={status === "active"}
                 onChange={(e) => setStatus(e.target.value)}
-                className="w-4 h-4 text-[#295782] focus:ring-[#295782]"
+                disabled={isSaving}
+                className="w-4 h-4 text-[#295782] focus:ring-[#295782] disabled:opacity-50"
               />
               <span className="text-sm text-[#1E293B]">Aktif</span>
             </label>
@@ -308,7 +328,8 @@ export default function EditTryout() {
                 value="inactive"
                 checked={status === "inactive"}
                 onChange={(e) => setStatus(e.target.value)}
-                className="w-4 h-4 text-[#295782] focus:ring-[#295782]"
+                disabled={isSaving}
+                className="w-4 h-4 text-[#295782] focus:ring-[#295782] disabled:opacity-50"
               />
               <span className="text-sm text-[#1E293B]">Nonaktif</span>
             </label>
@@ -337,6 +358,7 @@ export default function EditTryout() {
               {cat.subcategories.map((sub) => {
                 const savedQuestions = questionsByCategory[sub.id] || [];
                 const hasQuestions = savedQuestions.length > 0;
+                const hasImages = savedQuestions.some((q: any) => q.image_url);
 
                 return (
                   <div
@@ -348,14 +370,16 @@ export default function EditTryout() {
                         {sub.name}
                       </p>
                       {hasQuestions && (
-                        <p className="text-xs text-green-600 mt-1">
-                          {savedQuestions.length} soal tersimpan
-                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <p className="text-xs text-green-600">
+                            {savedQuestions.length} soal tersimpan
+                          </p>
+                        </div>
                       )}
                     </div>
                     <Link
                       to={`/admin-tryout/${id}/${sub.id}/questions/new`}
-                      className="px-4 py-2 text-sm bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90"
+                      className="px-4 py-2 text-sm bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90 transition-colors"
                     >
                       {hasQuestions ? "✏️ Edit Soal" : "+ Tambah Soal"}
                     </Link>
@@ -371,14 +395,15 @@ export default function EditTryout() {
       <div className="flex justify-end gap-3">
         <button
           onClick={() => navigate("/admin-tryout")}
-          className="px-6 py-2 border border-gray-300 text-[#64748B] rounded-lg hover:bg-gray-50"
+          disabled={isSaving}
+          className="px-6 py-2 border border-gray-300 text-[#64748B] rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           Batal
         </button>
         <button
           onClick={handleUpdateTryout}
           disabled={isSaving}
-          className="px-6 py-2 bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90 disabled:opacity-50 flex items-center gap-2"
+          className="px-6 py-2 bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
         >
           <Save className="w-4 h-4" />
           {isSaving ? "Menyimpan..." : "Simpan Perubahan"}
