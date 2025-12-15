@@ -24,7 +24,8 @@ import Dashboard from "./pages/Dashboard";
 import TryoutList from "./pages/TryoutList";
 import TryoutStart from "./pages/TryoutStart";
 import TryoutExam from "./pages/TryoutExam";
-import TryoutResult from "./pages/TryoutResult"; // ✅ NEW
+import TryoutResult from "./pages/TryoutResult"; 
+import TryoutRecommendations from "./pages/TryoutRecommendations"; 
 import Profile from "./pages/Profile";
 
 // Package Pages
@@ -109,12 +110,22 @@ const App = () => (
               }
             />
 
-            {/* ✅ NEW: Tryout Result Route */}
+            {/* Tryout Result Route */}
             <Route
               path="/tryout/:tryoutId/result"
               element={
                 <ProtectedRoute requiredRole="siswa">
                   <TryoutResult />
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Tryout Recommendations */}
+            <Route
+              path="/tryout/:tryoutId/tryoutrecommendations"
+              element={
+                <ProtectedRoute requiredRole="siswa">
+                  <TryoutRecommendations />
                 </ProtectedRoute>
               }
             />

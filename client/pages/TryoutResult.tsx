@@ -676,7 +676,7 @@ export default function TryoutResult() {
         {/* =============== ACTION BUTTONS =============== */}
         <div className="flex flex-col sm:flex-row gap-4">
           <button
-            onClick={() => navigate(`/tryout/${tryoutId}/recommendations`)} // ✅ Route ke halaman rekomendasi
+            onClick={() => navigate(`/tryout/${tryoutId}/tryoutrecommendations`)} // ✅ Route ke halaman rekomendasi
             className="flex-1 flex items-center justify-center gap-2 px-6 py-3 border-2 border-[#295782] text-[#295782] rounded-xl font-semibold hover:bg-blue-50 transition-colors"
           >
             <svg 
