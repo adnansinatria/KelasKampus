@@ -65,9 +65,18 @@ export default function SubtestList({
   };
 
   const getButtonText = (status: string) => {
-    if (status === 'completed') return 'Review';
+    if (status === 'completed') return 'Selesai ✓'; // ✅ Changed from 'Review'
     if (status === 'in_progress') return 'Lanjutkan';
     return 'Mulai';
+  };
+
+  // ✅ NEW: Handler untuk mencegah klik pada completed subtest
+  const handleSubtestClick = (kategoriId: string, status: string) => {
+    if (status === 'completed') {
+      // Tidak lakukan apa-apa jika sudah completed
+      return;
+    }
+    onStartSubtest(kategoriId);
   };
 
   return (
@@ -94,6 +103,9 @@ export default function SubtestList({
                       total: 0,
                       status: 'not_started'
                     };
+
+                    // ✅ NEW: Cek apakah completed
+                    const isCompleted = progress.status === 'completed';
 
                     return (
                       <div
@@ -125,6 +137,15 @@ export default function SubtestList({
                                   </span>
                                 </>
                               )}
+                              {/* ✅ NEW: Show completion message */}
+                              {isCompleted && (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-green-600 font-medium">
+                                    Sudah dikerjakan
+                                  </span>
+                                </>
+                              )}
                             </div>
 
                             {progress.status === 'in_progress' && (
@@ -143,13 +164,13 @@ export default function SubtestList({
                         </div>
 
                         <button
-                          onClick={() => onStartSubtest(kategori.id)}
-                          disabled={!canStart || isStarting}
+                          onClick={() => handleSubtestClick(kategori.id, progress.status)}
+                          disabled={!canStart || isStarting || isCompleted}
                           className={`ml-4 px-6 py-2 rounded-lg text-sm font-semibold transition-all flex-shrink-0 ${
-                            canStart && !isStarting
-                              ? progress.status === 'completed'
-                                ? 'bg-green-50 text-green-600 hover:bg-green-100'
-                                : progress.status === 'in_progress'
+                            isCompleted
+                              ? 'bg-green-50 text-green-600 cursor-not-allowed opacity-80' // ✅ Style for completed
+                              : canStart && !isStarting
+                              ? progress.status === 'in_progress'
                                 ? 'bg-blue-50 text-blue-600 hover:bg-blue-100'
                                 : 'bg-gradient-to-r from-[#295782] to-[#1e4060] text-white hover:shadow-md'
                               : 'bg-gray-100 text-gray-400 cursor-not-allowed'

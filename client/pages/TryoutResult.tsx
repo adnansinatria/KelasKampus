@@ -1,10 +1,10 @@
-// pages/TryoutResult.tsx - FULL CODE WITH IMAGE SUPPORT
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Trophy, Target, Clock, BarChart3, RefreshCw, Home } from 'lucide-react';
+import { ArrowLeft, Trophy, Target, Clock, BarChart3, RefreshCw, Home, BrainCircuit, Percent } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 import Header from '@/components/Header';
+import { api } from '@/lib/api';
 import {
   BarChart,
   Bar,
@@ -29,7 +29,7 @@ interface QuestionResult {
   isCorrect: boolean;
   topic: string;
   soal_text: string;
-  image_url?: string | null; // ✅ ADD THIS
+  image_url?: string | null;
 }
 
 interface TopicStats {
@@ -52,6 +52,16 @@ interface ResultStats {
   passingGrade: number;
 }
 
+interface IRTData {
+  overallTheta: number;
+  percentile: number;
+  details: {
+    kategoriId: string;
+    theta: number;
+    se: number;
+  }[];
+}
+
 export default function TryoutResult() {
   const { tryoutId } = useParams<{ tryoutId: string }>();
   const navigate = useNavigate();
@@ -67,9 +77,10 @@ export default function TryoutResult() {
   const [stats, setStats] = useState<ResultStats | null>(null);
   const [topicStats, setTopicStats] = useState<TopicStats[]>([]);
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('grid');
+  
+  const [irtData, setIrtData] = useState<IRTData | null>(null);
 
   useEffect(() => {
-    // ✅ Validate sessionId
     if (!sessionId) {
       toast.error('Session tidak valid');
       navigate('/tryout');
@@ -80,7 +91,6 @@ export default function TryoutResult() {
     fetchResultData();
   }, [sessionId]);
 
-  // ✅ PATTERN DARI ADMIN: Fetch current user via direct Supabase
   const fetchCurrentUser = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -92,82 +102,95 @@ export default function TryoutResult() {
           .single();
         
         setCurrentUser(userData);
+        
+        if (userData?.user_id && sessionId) {
+          fetchIRTData(sessionId, userData.user_id);
+        }
       }
     } catch (err) {
       console.error('Error fetching user:', err);
     }
   };
 
-  // ✅ PATTERN DARI ADMIN: Direct Supabase access (WITH IMAGE SUPPORT)
+  const fetchIRTData = async (sessId: string, userId: string) => {
+    try {
+      console.log('🧮 Calculating IRT Score...');
+      const response = await api.calculateIRTScore(sessId, userId);
+      
+      if (response.success && response.data) {
+        console.log('✅ IRT Data Received:', response.data);
+        setIrtData(response.data);
+      }
+    } catch (error) {
+      console.error('❌ Failed to calculate IRT:', error);
+    }
+  };
+
   const fetchResultData = async () => {
     try {
       setIsLoading(true);
-      console.log('🔍 Fetching result for session:', sessionId);
+      console.log('🔍 Fetching AGGREGATED result for tryout:', tryoutId);
 
-      // ✅ 1. Fetch session data (DIRECT SUPABASE)
-      const { data: session, error: sessionError } = await supabase
-        .from('tryout_sessions')
-        .select('*')
-        .eq('id', sessionId)
+      const { data: { session: authSession } } = await supabase.auth.getSession();
+      if (!authSession?.user) throw new Error('User not authenticated');
+
+      const { data: userData } = await supabase
+        .from('users')
+        .select('user_id')
+        .eq('auth_id', authSession.user.id)
         .single();
 
-      if (sessionError) throw sessionError;
-      if (!session) throw new Error('Session tidak ditemukan');
+      if (!userData) throw new Error('User data not found');
 
-      console.log('✅ Session data:', session);
-      setSessionData(session);
+      const { data: allSessions, error: sessionsError } = await supabase
+        .from('tryout_sessions')
+        .select('*')
+        .eq('tryout_id', tryoutId)
+        .eq('user_id', userData.user_id)
+        .eq('status', 'completed');
 
-      // ✅ 2. Fetch tryout detail (DIRECT SUPABASE)
+      if (sessionsError) throw sessionsError;
+      if (!allSessions || allSessions.length === 0) {
+        throw new Error('Tidak ada session yang selesai');
+      }
+
+      console.log('✅ Found completed sessions:', allSessions.length);
+
+      setSessionData(allSessions[0]);
+
       const { data: tryout, error: tryoutError } = await supabase
         .from('tryouts')
         .select('*')
-        .eq('id', session.tryout_id)
+        .eq('id', tryoutId)
         .single();
 
       if (tryoutError) throw tryoutError;
-      console.log('✅ Tryout data:', tryout);
       setTryoutData(tryout);
 
-      // ✅ 3. Fetch questions (DIRECT SUPABASE - WITH IMAGE URL)
-      let questionsQuery = supabase
+      const { data: questionsData, error: questionsError } = await supabase
         .from('questions')
-        .select('id, soal_text, opsi_a, opsi_b, opsi_c, opsi_d, jawaban_benar, kategori_id, urutan, image_url') // ✅ Include image_url
-        .eq('tryout_id', session.tryout_id)
+        .select('id, soal_text, opsi_a, opsi_b, opsi_c, opsi_d, jawaban_benar, kategori_id, urutan, image_url')
+        .eq('tryout_id', tryoutId)
         .order('urutan', { ascending: true });
 
-      // ✅ Filter by kategori if kategoriId is provided (per subtest)
-      if (kategoriId) {
-        questionsQuery = questionsQuery.eq('kategori_id', kategoriId);
-      }
-
-      const { data: questionsData, error: questionsError } = await questionsQuery;
-
       if (questionsError) throw questionsError;
-      console.log('✅ Questions loaded:', questionsData?.length || 0);
+      console.log('✅ Total questions loaded:', questionsData?.length || 0);
 
-      // ✅ Log questions with images
-      const questionsWithImage = questionsData?.filter(q => q.image_url) || [];
-      if (questionsWithImage.length > 0) {
-        console.log(`🖼️ Questions with images: ${questionsWithImage.length}`);
-      }
-
-      // ✅ 4. Fetch answers (DIRECT SUPABASE)
+      const sessionIds = allSessions.map(s => s.id);
+      
       const { data: answersData, error: answersError } = await supabase
         .from('answers')
         .select('*')
-        .eq('session_id', sessionId);
+        .in('session_id', sessionIds); // IN clause untuk multiple sessions
 
       if (answersError) throw answersError;
+      console.log('✅ Total answers loaded:', answersData?.length || 0);
 
-      // Convert answers array to map
       const answersMap: Record<string, string> = {};
       answersData?.forEach(answer => {
         answersMap[answer.question_id] = answer.selected_answer;
       });
 
-      console.log('✅ Answers loaded:', Object.keys(answersMap).length);
-
-      // ✅ 5. Process questions with answers (INCLUDING IMAGE_URL)
       const processedQuestions: QuestionResult[] = (questionsData || []).map((q, index) => ({
         id: q.id,
         questionNumber: index + 1,
@@ -176,16 +199,14 @@ export default function TryoutResult() {
         isCorrect: answersMap[q.id] === q.jawaban_benar,
         topic: q.kategori_id || 'General',
         soal_text: q.soal_text,
-        image_url: q.image_url || null, // ✅ Include image URL
+        image_url: q.image_url || null,
       }));
 
       setQuestions(processedQuestions);
 
-      // ✅ 6. Calculate statistics
       const calculatedStats = calculateStats(processedQuestions, tryout);
       setStats(calculatedStats);
 
-      // ✅ 7. Calculate per-topic analysis
       const topicAnalysis = calculateTopicStats(processedQuestions);
       setTopicStats(topicAnalysis);
 
@@ -198,7 +219,6 @@ export default function TryoutResult() {
     }
   };
 
-  // Calculate overall statistics
   const calculateStats = (questions: QuestionResult[], tryout: any): ResultStats => {
     let correct = 0;
     let wrong = 0;
@@ -219,11 +239,10 @@ export default function TryoutResult() {
       ? Math.round((correct / totalQuestions) * 100) 
       : 0;
 
-    const passingGrade = 65; // Default passing grade
+    const passingGrade = 65;
     const isPassed = score >= passingGrade;
 
-    // Calculate time spent (from session data)
-    const durasiTotal = (tryout?.durasi_menit || 0) * 60; // in seconds
+    const durasiTotal = (tryout?.durasi_menit || 0) * 60;
     const timeRemaining = sessionData?.time_remaining || 0;
     const timeSpent = durasiTotal - timeRemaining;
 
@@ -239,11 +258,9 @@ export default function TryoutResult() {
     };
   };
 
-  // Calculate per-topic statistics
   const calculateTopicStats = (questions: QuestionResult[]): TopicStats[] => {
     const topicMap: Record<string, TopicStats> = {};
 
-    // Topic name mapping
     const topicNameMap: Record<string, string> = {
       'biologi': 'Biologi',
       'kimia': 'Kimia',
@@ -285,7 +302,6 @@ export default function TryoutResult() {
       }
     });
 
-    // Calculate percentages
     const statsArray = Object.values(topicMap);
     statsArray.forEach(stat => {
       stat.percentage = stat.totalQuestions > 0
@@ -296,19 +312,16 @@ export default function TryoutResult() {
     return statsArray.sort((a, b) => b.percentage - a.percentage);
   };
 
-  // Format time display (MM:SS)
   const formatTime = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins} menit ${secs} detik`;
   };
 
-  // Handle retry tryout
   const handleRetry = () => {
     navigate(`/tryout/${tryoutId}/start`);
   };
 
-  // Loading state
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-[#e6f3ff] via-[#f8fbff] to-white flex items-center justify-center">
@@ -320,7 +333,6 @@ export default function TryoutResult() {
     );
   }
 
-  // No data state
   if (!stats || !tryoutData) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-[#e6f3ff] via-[#f8fbff] to-white flex items-center justify-center">
@@ -341,7 +353,6 @@ export default function TryoutResult() {
     );
   }
 
-  // Prepare chart data
   const distributionData = [
     { name: 'Benar', value: stats.correct, fill: '#3b82f6' },
     { name: 'Salah', value: stats.wrong, fill: '#3b82f6' },
@@ -361,7 +372,6 @@ export default function TryoutResult() {
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Back Button */}
         <button
           onClick={() => navigate('/tryout')}
           className="flex items-center gap-2 text-[#62748e] hover:text-[#295782] mb-6 transition-colors"
@@ -371,19 +381,67 @@ export default function TryoutResult() {
         </button>
 
         {/* =============== TOP SUMMARY CARDS =============== */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          {/* Score Card */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          {/* Score Card (Existing) */}
           <div className="bg-white rounded-2xl shadow-sm p-6 text-center">
             <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <Trophy className="w-7 h-7 text-blue-600" />
             </div>
             <div className="text-5xl font-bold text-[#1d293d] mb-2">
-              {stats.score}/100
+              {stats.score}
             </div>
-            <p className="text-[#62748e]">Skor Anda</p>
+            <p className="text-[#62748e]">Skor Klasik</p>
           </div>
 
-          {/* Grade Badge */}
+          {/* IRT Theta Score Card */}
+          <div className="bg-white rounded-2xl shadow-sm p-6 text-center border-2 border-purple-100">
+            <div className="w-14 h-14 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <BrainCircuit className="w-7 h-7 text-purple-600" />
+            </div>
+            {irtData ? (
+              <>
+                <div className="text-4xl font-bold text-purple-700 mb-1">
+                  {irtData.overallTheta.toFixed(2)}
+                </div>
+                <div className="text-sm font-medium text-purple-600 bg-purple-50 inline-block px-2 py-1 rounded mb-1">
+                  Theta Score
+                </div>
+                <p className="text-[#62748e] text-xs">
+                  Akurasi kemampuan murni
+                </p>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-24">
+                <span className="text-gray-400 text-sm">Menghitung IRT...</span>
+              </div>
+            )}
+          </div>
+
+          {/* Percentile Rank Card */}
+          <div className="bg-white rounded-2xl shadow-sm p-6 text-center border-2 border-indigo-100">
+            <div className="w-14 h-14 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Percent className="w-7 h-7 text-indigo-600" />
+            </div>
+            {irtData ? (
+              <>
+                <div className="text-4xl font-bold text-indigo-700 mb-1">
+                  Top {100 - irtData.percentile}%
+                </div>
+                <div className="text-sm font-medium text-indigo-600 bg-indigo-50 inline-block px-2 py-1 rounded mb-1">
+                  Peringkat Nasional
+                </div>
+                <p className="text-[#62748e] text-xs">
+                  Lebih baik dari {irtData.percentile}% peserta
+                </p>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-24">
+                <span className="text-gray-400 text-sm">Membandingkan...</span>
+              </div>
+            )}
+          </div>
+
+          {/* Grade Badge (Existing) */}
           <div className="bg-white rounded-2xl shadow-sm p-6 text-center">
             <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3 ${
               stats.isPassed ? 'bg-green-100' : 'bg-red-100'
@@ -393,23 +451,10 @@ export default function TryoutResult() {
             <div className={`inline-block px-6 py-2 rounded-full font-bold text-xl mb-2 ${
               stats.isPassed ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
             }`}>
-              {stats.isPassed ? 'LULUS' : 'TIDAK LULUS'}
+              {stats.isPassed ? 'LULUS' : 'GAGAL'}
             </div>
             <p className="text-[#62748e] text-sm mt-2">
               Passing Grade: {stats.passingGrade}
-            </p>
-          </div>
-
-          {/* Time Card */}
-          <div className="bg-white rounded-2xl shadow-sm p-6 text-center">
-            <div className="w-14 h-14 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
-              <Clock className="w-7 h-7 text-purple-600" />
-            </div>
-            <div className="text-2xl font-bold text-[#1d293d] mb-2">
-              {formatTime(stats.timeSpent)}
-            </div>
-            <p className="text-[#62748e] text-sm">
-              Dari total {stats.totalQuestions} soal
             </p>
           </div>
         </div>
@@ -421,7 +466,6 @@ export default function TryoutResult() {
               Detail Hasil Ujian
             </h2>
 
-            {/* Toggle View */}
             <div className="flex items-center gap-2">
               <span className="text-sm text-[#62748e]">Tampilan:</span>
               <div className="flex bg-gray-100 rounded-lg p-1">
@@ -449,7 +493,6 @@ export default function TryoutResult() {
             </div>
           </div>
 
-          {/* Grid View (10 columns per row) */}
           {viewMode === 'grid' && (
             <div className="grid grid-cols-5 sm:grid-cols-10 gap-2">
               {questions.map((q) => {
@@ -473,7 +516,6 @@ export default function TryoutResult() {
             </div>
           )}
 
-          {/* Table View (WITH IMAGE) */}
           {viewMode === 'table' && (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -491,7 +533,6 @@ export default function TryoutResult() {
                     <tr key={q.id} className="border-b hover:bg-gray-50">
                       <td className="p-3">{q.questionNumber}</td>
                       <td className="p-3 max-w-md">
-                        {/* ✅ NEW: Display image if exists */}
                         {q.image_url && (
                           <img
                             src={q.image_url}
@@ -540,7 +581,6 @@ export default function TryoutResult() {
           </h2>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Bar Chart - Distribusi Jawaban */}
             <div>
               <h3 className="font-semibold text-gray-700 mb-4">
                 Distribusi Jawaban
@@ -556,7 +596,6 @@ export default function TryoutResult() {
               </ResponsiveContainer>
             </div>
 
-            {/* Radar Chart - Analisis Per Topik */}
             <div>
               <h3 className="font-semibold text-gray-700 mb-4">
                 Analisis Per Topik
@@ -585,7 +624,6 @@ export default function TryoutResult() {
             </div>
           </div>
 
-          {/* Topic Stats Table */}
           {topicStats.length > 0 && (
             <div className="mt-8">
               <h3 className="font-semibold text-gray-700 mb-4">
@@ -638,11 +676,23 @@ export default function TryoutResult() {
         {/* =============== ACTION BUTTONS =============== */}
         <div className="flex flex-col sm:flex-row gap-4">
           <button
-            onClick={handleRetry}
+            onClick={() => navigate(`/tryout/${tryoutId}/recommendations`)} // ✅ Route ke halaman rekomendasi
             className="flex-1 flex items-center justify-center gap-2 px-6 py-3 border-2 border-[#295782] text-[#295782] rounded-xl font-semibold hover:bg-blue-50 transition-colors"
           >
-            <RefreshCw className="w-5 h-5" />
-            Ulangi Tryout
+            <svg 
+              className="w-5 h-5" 
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={2} 
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" 
+              />
+            </svg>
+            Lihat Rekomendasi
           </button>
           <button
             onClick={() => navigate('/dashboard')}

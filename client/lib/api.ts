@@ -333,6 +333,26 @@ export const api = {
     });
   },
 
+  /**
+   * Calculate IRT score for a completed session
+   * This calls the Edge Function directly to perform Newton-Raphson calculation
+   */
+  calculateIRTScore: async (sessionId: string, userId: string) => {
+    console.log(`🧮 Triggering IRT Calculation for session: ${sessionId}`);
+    // Menggunakan apiCall karena endpoint ini ada di dalam /tryouts prefix (/tryouts/irt/score)
+    return apiCall('/irt/score', {
+      method: 'POST',
+      body: JSON.stringify({ sessionId, userId }),
+    }, 15000); // Timeout lebih lama (15s) karena perhitungan matematika berat
+  },
+
+  /**
+   * Get IRT Report (Optional: jika nanti mau fetch report tanpa hitung ulang)
+   */
+  getIRTReport: async (sessionId: string) => {
+    return apiCall(`/irt/report/${sessionId}`);
+  },
+
   // ✅ KAMPUS/PRODI METHODS (tanpa /tryouts prefix + CACHE)
   
   /**

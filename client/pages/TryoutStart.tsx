@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Play, Clock, FileText, Calendar } from 'lucide-react';
+import { ArrowLeft, Play, Clock, FileText, Calendar, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import toast from 'react-hot-toast';
@@ -8,6 +8,7 @@ import Header from '@/components/Header';
 import SubtestList from '@/components/tryout/SubtestList';
 import TargetSelectionModal from '@/components/tryout/TargetSelectionModal';
 import { api } from '@/lib/api';
+import { supabase } from '@/lib/supabase'; // ✅ Import supabase
 import { useTryoutData } from '@/hooks/useTryoutData';
 
 export default function TryoutStart() {
@@ -27,7 +28,6 @@ export default function TryoutStart() {
     refreshData
   } = useTryoutData(tryoutId!);
 
-  // Auto-open modal if no target selected
   useEffect(() => {
     if (!isLoading && !targetInfo) {
       setShowTargetModal(true);
@@ -52,13 +52,17 @@ export default function TryoutStart() {
       return;
     }
 
+    if (kategoriKode && progressData[kategoriKode]?.status === 'completed') {
+      toast.error('Subtest ini sudah selesai. Anda tidak dapat mengerjakannya lagi.');
+      return;
+    }
+
     try {
       setIsStarting(true);
 
       console.log('👤 Target Info:', targetInfo);
       console.log('✅ kategoriKode to use:', kategoriKode || 'NULL (all categories)');
 
-      // ✅ CHANGED: Use API call instead of direct Supabase query
       console.log('🚀 Calling API to create session...');
       
       const sessionResponse = await api.createSession({
@@ -70,7 +74,6 @@ export default function TryoutStart() {
 
       console.log('✅ Session API Response:', sessionResponse);
 
-      // ✅ NEW: Handle response from API
       if (!sessionResponse?.session_id) {
         throw new Error('Failed to create session - no session_id returned');
       }
@@ -97,6 +100,61 @@ export default function TryoutStart() {
       setIsStarting(false);
     }
   };
+
+  // ✅ NEW: Handler untuk submit final setelah semua subtest selesai
+  const handleSubmitFinal = async () => {
+    try {
+      setIsStarting(true);
+      
+      // ✅ Cek apakah ada subtest yang belum selesai
+      const incompleteSub = Object.values(progressData).find(
+        (p) => p.status !== 'completed'
+      );
+      
+      if (incompleteSub) {
+        toast.error('Selesaikan semua subtest terlebih dahulu!');
+        setIsStarting(false);
+        return;
+      }
+
+      toast.loading('Mengkalkulasi hasil akhir...');
+      
+      // ✅ Submit tryout (ambil session ID dari subtest mana saja yang sudah completed)
+      const { data: sessions, error } = await supabase
+        .from('tryout_sessions')
+        .select('id')
+        .eq('tryout_id', tryoutId)
+        .eq('user_id', currentUser?.user_id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error || !sessions?.id) {
+        throw new Error('Session tidak ditemukan');
+      }
+
+      // ✅ Submit tryout via API
+      await api.submitTryout(sessions.id);
+
+      toast.dismiss();
+      toast.success('Tryout berhasil diselesaikan!');
+      
+      // ✅ Navigate ke result
+      navigate(`/tryout/${tryoutId}/result?session=${sessions.id}`);
+      
+    } catch (err: any) {
+      console.error('❌ Error submitting final:', err);
+      toast.dismiss();
+      toast.error(err.message || 'Gagal submit tryout');
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  // ✅ Cek apakah semua subtest sudah selesai
+  const allSubtestsCompleted = Object.keys(progressData).length > 0 && Object.values(progressData).every(
+    (p) => p.status === 'completed'
+  );
 
   // Loading state
   if (isLoading) {
@@ -168,7 +226,7 @@ export default function TryoutStart() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left Column - Subtest List */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-6">
             <SubtestList
               groupedKategoris={groupedKategoris}
               progressData={progressData}
@@ -241,64 +299,79 @@ export default function TryoutStart() {
               </ul>
             </div>
 
-            {/* Start Button */}
-            <button
-              onClick={() => {
-                // Cari subkategori pertama yang belum completed
-                let firstIncompleteKategori: string | null = null;
-                
-                // Loop berdasarkan urutan kelompok
-                const kelompokOrder = ['TPS', 'Literasi', 'Matematika', 'Sains', 'Sosial'];
-                
-                for (const kelompok of kelompokOrder) {
-                  const kategorisInGroup = groupedKategoris[kelompok];
-                  if (!kategorisInGroup) continue;
+            {allSubtestsCompleted ? (
+              <button
+                onClick={handleSubmitFinal}
+                disabled={isStarting}
+                className="w-full py-4 rounded-xl text-base font-bold shadow-lg transition-all flex items-center justify-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isStarting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    Memproses...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="w-5 h-5" />
+                    Lihat Hasil Akhir
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  let firstIncompleteKategori: string | null = null;
                   
-                  // Sort by urutan
-                  const sortedKategoris = [...kategorisInGroup].sort((a, b) => a.urutan - b.urutan);
+                  const kelompokOrder = ['TPS', 'Literasi', 'Matematika', 'Sains', 'Sosial'];
                   
-                  for (const kategori of sortedKategoris) {
-                    const progress = progressData[kategori.id];
+                  for (const kelompok of kelompokOrder) {
+                    const kategorisInGroup = groupedKategoris[kelompok];
+                    if (!kategorisInGroup) continue;
                     
-                    // Cek apakah belum completed
-                    if (!progress || progress.status !== 'completed') {
-                      firstIncompleteKategori = kategori.id;
-                      break;
+                    // Sort by urutan
+                    const sortedKategoris = [...kategorisInGroup].sort((a, b) => a.urutan - b.urutan);
+                    
+                    for (const kategori of sortedKategoris) {
+                      const progress = progressData[kategori.id];
+                      
+                      // Cek apakah belum completed
+                      if (!progress || progress.status !== 'completed') {
+                        firstIncompleteKategori = kategori.id;
+                        break;
+                      }
                     }
+                    
+                    if (firstIncompleteKategori) break;
                   }
                   
-                  if (firstIncompleteKategori) break;
-                }
-                
-                if (firstIncompleteKategori) {
-                  console.log('Starting first incomplete kategori:', firstIncompleteKategori);
-                  handleStartTryout(firstIncompleteKategori);
-                } else {
-                  toast.error('Semua subtest sudah diselesaikan!');
-                }
-              }}
-              disabled={isStarting || !targetInfo}
-              className={`w-full py-4 rounded-xl text-base font-bold shadow-lg transition-all flex items-center justify-center gap-2 ${
-                targetInfo
-                  ? 'bg-gradient-to-r from-[#295782] to-[#1e4060] text-white hover:shadow-xl'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              {isStarting ? (
-                <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                  Memulai...
-                </>
-              ) : (
-                <>
-                  <Play className="w-5 h-5" />
-                  Mulai Tryout
-                </>
-              )}
-            </button>
+                  if (firstIncompleteKategori) {
+                    console.log('Starting first incomplete kategori:', firstIncompleteKategori);
+                    handleStartTryout(firstIncompleteKategori);
+                  }
+                }}
+                disabled={isStarting || !targetInfo}
+                className={`w-full py-4 rounded-xl text-base font-bold shadow-lg transition-all flex items-center justify-center gap-2 ${
+                  targetInfo
+                    ? 'bg-gradient-to-r from-[#295782] to-[#1e4060] text-white hover:shadow-xl'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {isStarting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    Memulai...
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-5 h-5" />
+                    Mulai Tryout
+                  </>
+                )}
+              </button>
+            )}
 
             {/* Warning message */}
-            {!targetInfo && (
+            {!targetInfo && !allSubtestsCompleted && (
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center">
                 <p className="text-xs text-orange-600 font-medium">
                   ⚠️ Pilih kampus dan program studi terlebih dahulu
