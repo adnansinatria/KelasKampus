@@ -1,6 +1,3 @@
-// pages/TryoutExam.tsx
-// ✅ FINAL VERSION - Handler sudah sesuai dengan QuestionDisplay props
-
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Flag } from 'lucide-react';
@@ -38,6 +35,29 @@ export default function TryoutExam() {
     bookmarkedQuestions,
     saveBookmarks
   } = useExamSession(sessionId || '', kategoriId || undefined);
+
+  useEffect(() => {
+    const checkSubtestCompletion = async () => {
+      if (!sessionId || !currentUser?.user_id) return;
+      
+      try {
+        const { data: session } = await supabase
+          .from('tryout_sessions')
+          .select('status')
+          .eq('id', sessionId)
+          .single();
+        
+        if (session?.status === 'completed') {
+          toast.error('Subtest ini sudah selesai. Anda tidak dapat mengerjakannya lagi.');
+          navigate(`/tryout/${tryoutId}/start`);
+        }
+      } catch (err) {
+        console.error('Error checking subtest status:', err);
+      }
+    };
+    
+    checkSubtestCompletion();
+  }, [sessionId, currentUser, navigate, tryoutId]);
 
   // ✅ Fetch current user
   useEffect(() => {
@@ -85,19 +105,31 @@ export default function TryoutExam() {
     }
   };
 
-  const handleManualSubmit = async () => {
+  const handleFinishSubtest = async () => {
     try {
-      await submitExam();
-      toast.success('Tryout berhasil disubmit!');
-      navigate(`/tryout/${tryoutId}/result?session=${sessionId}`);
+      if (bookmarkedQuestions.length > 0) {
+        await saveBookmarks(bookmarkedQuestions);
+      }
+      
+      await supabase
+        .from('tryout_sessions')
+        .update({
+          status: 'completed',
+          time_remaining: timeRemaining,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', sessionId);
+
+      toast.success('Subtest selesai! Progress tersimpan');
+      
+      navigate(`/tryout/${tryoutId}/start`);
+      
     } catch (err) {
-      toast.error('Gagal submit tryout');
+      console.error('Error finishing subtest:', err);
+      toast.error('Gagal menyimpan progress');
     }
   };
 
-  // ✅ CRITICAL FIX: Handler yang sesuai dengan QuestionDisplay props
-  // QuestionDisplay expects: onAnswerSelect: (answer: string) => void
-  // Hanya terima 1 parameter (answer key), bukan questionId
   const handleAnswerSelect = (answer: string) => {
     if (!currentQuestion) {
       console.error('❌ No current question');
@@ -106,14 +138,11 @@ export default function TryoutExam() {
 
     console.log('✅ Answer selected:', answer, 'for question ID:', currentQuestion.id);
     
-    // ✅ Call saveAnswer dari hook dengan question.id
     saveAnswer(currentQuestion.id, answer);
   };
 
-  // Get current question
   const currentQuestion = questions[currentIndex];
 
-  // ✅ Exit handler
   const handleExit = async () => {
     console.log('🚪 Exit button clicked');
 
@@ -140,7 +169,6 @@ export default function TryoutExam() {
     navigate(`/tryout/${tryoutId}/start`);
   };
 
-  // ✅ Toggle bookmark
   const handleToggleBookmark = async () => {
     let updated: number[];
 
@@ -429,21 +457,18 @@ export default function TryoutExam() {
       {/* Submit Confirmation Modal */}
       {showSubmitConfirm && (
         <>
-          <div
-            className="fixed inset-0 bg-black bg-opacity-50 z-40"
-            onClick={() => setShowSubmitConfirm(false)}
-          />
-          <div className="fixed inset-0 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-              <h3 className="text-xl font-bold mb-4">Konfirmasi Selesai</h3>
-              <p className="text-gray-600 mb-2">
-                Apakah kamu yakin ingin mengakhiri tryout? Pastikan semua jawaban
-                sudah benar.
+          <div className="fixed inset-0 bg-black/50 z-50" onClick={() => setShowSubmitConfirm(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
+              <h3 className="text-xl font-bold text-gray-900 mb-3">
+                Selesai Subtest Ini?
+              </h3>
+              <p className="text-gray-600 mb-4">
+                Progress Anda akan disimpan. Anda dapat melanjutkan subtest lain atau melihat hasil akhir dari halaman Start.
               </p>
               <p className="text-sm text-gray-500 mb-6">
                 ⚠️ Soal terjawab: {Object.keys(answers).length}/{questions.length}
               </p>
-
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowSubmitConfirm(false)}
@@ -452,7 +477,7 @@ export default function TryoutExam() {
                   Batal
                 </button>
                 <button
-                  onClick={handleManualSubmit}
+                  onClick={handleFinishSubtest}
                   className="flex-1 px-4 py-2.5 bg-[#00A63E] text-white rounded-xl hover:bg-[#009038] font-medium transition-colors"
                 >
                   Ya, Selesai
@@ -462,7 +487,6 @@ export default function TryoutExam() {
           </div>
         </>
       )}
-
       {/* Question Sidebar Modal (Mobile) */}
       <QuestionSidebar
         show={showSidebar}
