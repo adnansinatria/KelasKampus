@@ -4,6 +4,7 @@ import { ArrowLeft, Trophy, Target, Clock, BarChart3, RefreshCw, Home, BrainCirc
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 import Header from '@/components/Header';
+import AnalysisView from '@/components/tryout/AnalysisView';
 import { api } from '@/lib/api';
 import {
   BarChart,
@@ -30,6 +31,12 @@ interface QuestionResult {
   topic: string;
   soal_text: string;
   image_url?: string | null;
+  topik?: string; 
+  pembahasan?: string; 
+  opsi_a?: string;
+  opsi_b?: string;
+  opsi_c?: string;
+  opsi_d?: string;
 }
 
 interface TopicStats {
@@ -39,6 +46,7 @@ interface TopicStats {
   unanswered: number;
   totalQuestions: number;
   percentage: number;
+  questions: QuestionResult[];
 }
 
 interface ResultStats {
@@ -79,6 +87,9 @@ export default function TryoutResult() {
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('grid');
   
   const [irtData, setIrtData] = useState<IRTData | null>(null);
+  const [passingGradeData, setPassingGradeData] = useState<number>(65);
+  const [targetKampus, setTargetKampus] = useState<string>(''); 
+  const [targetProdi, setTargetProdi] = useState<string>('');
 
   useEffect(() => {
     if (!sessionId) {
@@ -90,6 +101,20 @@ export default function TryoutResult() {
     fetchCurrentUser();
     fetchResultData();
   }, [sessionId]);
+
+  useEffect(() => {
+    // Re-calculate stats ketika passing grade atau questions berubah
+    if (questions.length > 0 && tryoutData && passingGradeData) {
+      console.log('🔄 Recalculating stats with passing grade:', passingGradeData);
+      const updatedStats = calculateStats(questions, tryoutData);
+      setStats(updatedStats);
+    }
+  }, [passingGradeData, questions, tryoutData]);
+
+  const initializeResult = async () => {
+    await fetchCurrentUser();
+    await fetchResultData();
+  };
 
   const fetchCurrentUser = async () => {
     try {
@@ -104,7 +129,8 @@ export default function TryoutResult() {
         setCurrentUser(userData);
         
         if (userData?.user_id && sessionId) {
-          fetchIRTData(sessionId, userData.user_id);
+          await fetchPassingGrade(userData.user_id);
+          await fetchIRTData(sessionId, userData.user_id);
         }
       }
     } catch (err) {
@@ -123,6 +149,65 @@ export default function TryoutResult() {
       }
     } catch (error) {
       console.error('❌ Failed to calculate IRT:', error);
+    }
+  };
+
+  const fetchPassingGrade = async (userId: string): Promise<number> => {
+    try {
+      console.log('📊 Fetching passing grade...');
+
+      // Fetch user target
+      const { data: userTarget, error: targetError } = await supabase
+        .from('user_targets')
+        .select('kampus_name, prodi_name')
+        .eq('tryout_id', tryoutId)
+        .eq('user_id', userId)
+        .single();
+
+      if (targetError || !userTarget) {
+        console.warn('⚠️ User target not set, using default passing grade 65');
+        return 65;
+      }
+
+      console.log('✅ User Target:', userTarget);
+      setTargetKampus(userTarget.kampus_name);
+      setTargetProdi(userTarget.prodi_name);
+
+      // Fetch kampus ID
+      const { data: kampusData, error: kampusError } = await supabase
+        .from('kampus')
+        .select('id')
+        .eq('nama_kampus', userTarget.kampus_name)
+        .single();
+
+      if (kampusError || !kampusData) {
+        console.warn('⚠️ Kampus not found:', userTarget.kampus_name);
+        return 65;
+      }
+
+      console.log('✅ Kampus ID:', kampusData.id);
+
+      // Fetch passing grade from program_studi
+      const { data: prodiData, error: prodiError } = await supabase
+        .from('program_studi')
+        .select('passing_grade_histories')
+        .eq('kampus_id', kampusData.id)
+        .eq('nama_prodi', userTarget.prodi_name)
+        .single();
+
+      if (prodiError || !prodiData || !prodiData.passing_grade_histories) {
+        console.warn('⚠️ Passing grade not found for:', userTarget.prodi_name);
+        return 65;
+      }
+
+      const pg = parseFloat(prodiData.passing_grade_histories);
+      console.log('✅ Passing Grade found:', pg);
+      
+      setPassingGradeData(pg);
+      return pg;
+    } catch (error) {
+      console.error('❌ Failed to fetch passing grade:', error);
+      return 65;
     }
   };
 
@@ -169,7 +254,7 @@ export default function TryoutResult() {
 
       const { data: questionsData, error: questionsError } = await supabase
         .from('questions')
-        .select('id, soal_text, opsi_a, opsi_b, opsi_c, opsi_d, jawaban_benar, kategori_id, urutan, image_url')
+        .select('id, soal_text, opsi_a, opsi_b, opsi_c, opsi_d, jawaban_benar, kategori_id, urutan, image_url, pembahasan')
         .eq('tryout_id', tryoutId)
         .order('urutan', { ascending: true });
 
@@ -198,8 +283,14 @@ export default function TryoutResult() {
         correctAnswer: q.jawaban_benar,
         isCorrect: answersMap[q.id] === q.jawaban_benar,
         topic: q.kategori_id || 'General',
+        topik: q.kategori_id || 'General',
         soal_text: q.soal_text,
         image_url: q.image_url || null,
+        pembahasan: q.pembahasan || 'Pembahasan belum tersedia.',
+        opsi_a: q.opsi_a, 
+        opsi_b: q.opsi_b, 
+        opsi_c: q.opsi_c, 
+        opsi_d: q.opsi_d, 
       }));
 
       setQuestions(processedQuestions);
@@ -239,8 +330,11 @@ export default function TryoutResult() {
       ? Math.round((correct / totalQuestions) * 100) 
       : 0;
 
-    const passingGrade = 65;
-    const isPassed = score >= passingGrade;
+    console.log('📊 Calculating stats:');
+    console.log('  - Score:', score);
+    console.log('  - Passing Grade:', passingGradeData);
+
+    const isPassed = score >= passingGradeData;
 
     const durasiTotal = (tryout?.durasi_menit || 0) * 60;
     const timeRemaining = sessionData?.time_remaining || 0;
@@ -254,7 +348,7 @@ export default function TryoutResult() {
       unanswered,
       timeSpent: Math.max(0, timeSpent),
       isPassed,
-      passingGrade
+      passingGrade: passingGradeData,
     };
   };
 
@@ -287,10 +381,13 @@ export default function TryoutResult() {
           wrong: 0,
           unanswered: 0,
           totalQuestions: 0,
-          percentage: 0
+          percentage: 0,
+          questions: []
         };
       }
 
+      topicMap[topicName].questions.push(q);
+      
       topicMap[topicName].totalQuestions++;
 
       if (!q.userAnswer) {
@@ -456,6 +553,11 @@ export default function TryoutResult() {
             <p className="text-[#62748e] text-sm mt-2">
               Passing Grade: {stats.passingGrade}
             </p>
+            {targetKampus && targetProdi && (
+              <p className="text-xs text-gray-500 mt-1">
+                {targetKampus} - {targetProdi}
+              </p>
+            )}
           </div>
         </div>
 
@@ -624,53 +726,13 @@ export default function TryoutResult() {
             </div>
           </div>
 
-          {topicStats.length > 0 && (
-            <div className="mt-8">
-              <h3 className="font-semibold text-gray-700 mb-4">
-                Detail Per Topik
-              </h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="text-left p-3 font-semibold">Topik</th>
-                      <th className="text-center p-3 font-semibold">Benar</th>
-                      <th className="text-center p-3 font-semibold">Salah</th>
-                      <th className="text-center p-3 font-semibold">Tidak Dijawab</th>
-                      <th className="text-center p-3 font-semibold">Persentase</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {topicStats.map((stat) => (
-                      <tr key={stat.topic} className="border-b hover:bg-gray-50">
-                        <td className="p-3">{stat.topic || 'General'}</td>
-                        <td className="p-3 text-center text-green-600 font-semibold">
-                          {stat.correct}
-                        </td>
-                        <td className="p-3 text-center text-red-600 font-semibold">
-                          {stat.wrong}
-                        </td>
-                        <td className="p-3 text-center text-gray-500">
-                          {stat.unanswered}
-                        </td>
-                        <td className="p-3 text-center">
-                          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                            stat.percentage >= 70
-                              ? 'bg-green-100 text-green-700'
-                              : stat.percentage >= 50
-                              ? 'bg-yellow-100 text-yellow-700'
-                              : 'bg-red-100 text-red-700'
-                          }`}>
-                            {stat.percentage}%
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          {/* ✅ TAB SWITCHING - Detail Per Topik & Analisa Soal */}
+          <div className="mt-8">
+            <AnalysisView 
+              topicStats={topicStats}
+              allQuestions={questions}
+            />
+          </div>
         </div>
 
         {/* =============== ACTION BUTTONS =============== */}
