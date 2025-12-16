@@ -438,7 +438,7 @@ export default function AddQuestionPage() {
                 {/* ✅ NEW: Pembahasan Field */}
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Pembahasan (Opsional)
+                    Pembahasan
                   </label>
                   <textarea
                     value={q.pembahasan}
