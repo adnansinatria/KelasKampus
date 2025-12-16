@@ -36,6 +36,7 @@
     "plugin-react": "0.0.1-security",
     "react-hot-toast": "^2.6.0",
     "resend": "^6.4.2",
+    "vercel": "^50.1.0",
     "zod": "^3.25.76",
     "zustand": "^5.0.8"
   },
