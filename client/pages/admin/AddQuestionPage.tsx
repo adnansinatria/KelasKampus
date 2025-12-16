@@ -1,4 +1,3 @@
-// AddQuestionPage.tsx - FULL CODE WITH IMAGE FEATURE
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Plus, Trash2, Image, X } from "lucide-react";
@@ -7,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import useTryoutStore from '../../stores/tryoutStore';
 
-// ✅ Type Definition
+// ✅ UPDATED: Type Definition with pembahasan
 interface Question {
   question: string;
   optionA: string;
@@ -15,17 +14,19 @@ interface Question {
   optionC: string;
   optionD: string;
   answer: string;
+  pembahasan: string;  // ← NEW FIELD
   image: File | null;
   image_url: string;
 }
 
-const initialQuestion: Question = { 
-  question: "", 
-  optionA: "", 
-  optionB: "", 
-  optionC: "", 
-  optionD: "", 
+const initialQuestion: Question = {
+  question: "",
+  optionA: "",
+  optionB: "",
+  optionC: "",
+  optionD: "",
   answer: "",
+  pembahasan: "",  // ← NEW FIELD
   image: null,
   image_url: "",
 };
@@ -33,13 +34,10 @@ const initialQuestion: Question = {
 export default function AddQuestionPage() {
   const { tryoutId, kategoriId } = useParams<{ tryoutId: string; kategoriId: string }>();
   const navigate = useNavigate();
-
-  const { questionsByCategory, setQuestionsForCategory, resetTryout } = useTryoutStore();
-  
+  const { questionsByCategory, setQuestionsForCategory } = useTryoutStore();
   const [questions, setQuestions] = useState<Question[]>([initialQuestion]);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-
   const isNewMode = tryoutId === 'new';
 
   useEffect(() => {
@@ -60,7 +58,6 @@ export default function AddQuestionPage() {
         }
 
         console.log("✏️ Edit mode detected, loading from database");
-        
         const response = await api.adminGetTryoutQuestions(tryoutId!);
         const allQuestions = response?.data || response;
 
@@ -79,6 +76,7 @@ export default function AddQuestionPage() {
             optionC: q.opsi_c || "",
             optionD: q.opsi_d || "",
             answer: q.jawaban_benar || "",
+            pembahasan: q.pembahasan || "",  // ← LOAD FROM DB
             image: null,
             image_url: q.image_url || "",
           }));
@@ -88,6 +86,7 @@ export default function AddQuestionPage() {
         } else {
           setQuestions([{ ...initialQuestion }]);
         }
+
       } catch (err: any) {
         console.error("❌ Error loading questions:", err);
         toast.error("Gagal memuat soal dari database");
@@ -118,7 +117,6 @@ export default function AddQuestionPage() {
     setQuestions(updatedQuestions);
   };
 
-  // ✅ NEW: Handle image upload
   const handleImageChange = (index: number, file: File | null) => {
     if (!file) return;
 
@@ -143,7 +141,6 @@ export default function AddQuestionPage() {
     setQuestions(updatedQuestions);
   };
 
-  // ✅ NEW: Remove image
   const handleRemoveImage = (index: number) => {
     const updatedQuestions = [...questions];
     updatedQuestions[index] = {
@@ -154,7 +151,6 @@ export default function AddQuestionPage() {
     setQuestions(updatedQuestions);
   };
 
-  // ✅ NEW: Upload image to Supabase Storage
   const uploadImageToStorage = async (file: File, questionIndex: number): Promise<string> => {
     try {
       const fileExt = file.name.split('.').pop();
@@ -172,7 +168,6 @@ export default function AddQuestionPage() {
 
       if (uploadError) {
         console.error('Upload error:', uploadError);
-        
         if (uploadError.message.includes('exceeded')) {
           throw new Error('File terlalu besar. Maksimal 2MB.');
         }
@@ -218,10 +213,10 @@ export default function AddQuestionPage() {
     setIsSaving(true);
 
     try {
-      // ✅ Step 1: Upload all new images
+      // Upload images
       console.log('📤 Uploading images...');
       const questionsWithImages = [...questions];
-      
+
       for (let i = 0; i < questionsWithImages.length; i++) {
         if (questionsWithImages[i].image && questionsWithImages[i].image instanceof File) {
           try {
@@ -235,13 +230,13 @@ export default function AddQuestionPage() {
           }
         }
       }
-      
+
       console.log('✅ All images uploaded successfully');
 
-      // ✅ Step 2: Save to database
+      // Save to database
       const allDBQuestions = await api.adminGetTryoutQuestions(tryoutId!);
-      const dbQuestionsData = Array.isArray(allDBQuestions?.data) 
-        ? allDBQuestions.data 
+      const dbQuestionsData = Array.isArray(allDBQuestions?.data)
+        ? allDBQuestions.data
         : allDBQuestions;
 
       const otherCategoryQuestions = dbQuestionsData.filter(
@@ -263,6 +258,7 @@ export default function AddQuestionPage() {
           opsi_c: q.opsi_c,
           opsi_d: q.opsi_d,
           jawaban_benar: q.jawaban_benar,
+          pembahasan: q.pembahasan || null,  // ← KEEP EXISTING PEMBAHASAN
           image_url: q.image_url || null,
         });
       });
@@ -278,17 +274,18 @@ export default function AddQuestionPage() {
           opsi_c: q.optionC,
           opsi_d: q.optionD,
           jawaban_benar: q.answer,
+          pembahasan: q.pembahasan || null,  // ← SAVE PEMBAHASAN
           image_url: q.image_url || null,
         });
       });
 
       await api.adminBulkInsertQuestions(allQuestionsToInsert);
-
       setQuestionsForCategory(kategoriId!, questionsWithImages);
+
       toast.success("Semua soal berhasil disimpan!");
-      
       console.log(`✅ Saved ${questions.length} questions for kategori ${kategoriId}`);
       navigate(-1);
+
     } catch (err: any) {
       console.error("❌ Error saving questions:", err);
       toast.error(`Gagal menyimpan: ${err.message}`);
@@ -299,65 +296,57 @@ export default function AddQuestionPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#F8FBFF] px-6 py-8">
-        <div className="max-w-4xl mx-auto bg-white shadow rounded-2xl p-6">
-          <div className="flex items-center justify-center h-64">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#295782] mx-auto mb-4"></div>
-              <p className="text-[#64748B]">Memuat soal...</p>
-            </div>
-          </div>
-        </div>
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-gray-600">Memuat soal...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FBFF] px-6 py-8">
-      <div className="max-w-4xl mx-auto bg-white shadow rounded-2xl p-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+      <div className="max-w-5xl mx-auto">
         <button
           onClick={() => navigate(-1)}
           className="flex items-center gap-2 text-sm text-[#295782] hover:underline mb-6"
           disabled={isSaving}
         >
-          <ArrowLeft className="w-4 h-4" /> Kembali
+          <ArrowLeft className="w-4 h-4" />
+          Kembali
         </button>
 
-        <h1 className="text-2xl font-bold text-[#1E293B] mb-6">Tambah Soal Baru</h1>
+        <h1 className="text-3xl font-bold mb-8 text-gray-800">Tambah Soal Baru</h1>
 
-        <form onSubmit={handleSubmit} className="space-y-8">
-          <div>
-            <h2 className="text-lg font-semibold text-[#1E293B] mb-4">Daftar Soal</h2>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <h2 className="text-xl font-semibold mb-4 text-gray-700">Daftar Soal</h2>
 
             {questions.map((q, index) => (
-              <div key={index} className="border rounded-xl p-4 mb-4 bg-[#F9FBFF]">
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="font-medium text-[#1E293B]">Soal {index + 1}</h3>
+              <div key={index} className="mb-8 pb-8 border-b border-gray-200 last:border-0">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-700">Soal {index + 1}</h3>
                   {questions.length > 1 && (
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={() => removeQuestion(index)}
                       disabled={isSaving}
+                      className="text-red-600 hover:text-red-800 p-2 transition-colors"
                     >
-                      <Trash2 className="w-4 h-4 text-red-500 hover:text-red-700" />
+                      <Trash2 className="w-5 h-5" />
                     </button>
                   )}
                 </div>
 
-                {/* ✅ NEW: Image Upload Section - DI ATAS TEXTAREA */}
-                <div className="mb-3">
-                  <label className="flex items-center gap-2 text-xs font-medium text-[#64748B] mb-2">
-                    <Image className="w-3.5 h-3.5" />
+                {/* Image Upload Section */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Gambar Soal (Opsional)
                   </label>
-                  
                   {q.image_url ? (
-                    // Preview image
                     <div className="relative inline-block">
-                      <img 
-                        src={q.image_url} 
-                        alt="Preview soal" 
-                        className="max-w-full h-auto max-h-40 rounded-lg border-2 border-[#E2E8F0]"
+                      <img
+                        src={q.image_url}
+                        alt={`Soal ${index + 1}`}
+                        className="max-w-md h-auto rounded-lg border-2 border-gray-200"
                       />
                       <button
                         type="button"
@@ -365,18 +354,19 @@ export default function AddQuestionPage() {
                         disabled={isSaving}
                         className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full hover:bg-red-600 transition-colors shadow-md"
                       >
-                        <X className="w-3.5 h-3.5" />
+                        <X className="w-4 h-4" />
                       </button>
                     </div>
                   ) : (
-                    // Upload button
-                    <label className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#F1F5F9] text-[#295782] border border-[#CBD5E1] rounded-lg cursor-pointer hover:bg-[#E2E8F0] transition-colors text-xs">
-                      <Image className="w-3.5 h-3.5" />
-                      <span className="font-medium">Upload Gambar</span>
+                    <label className="cursor-pointer inline-block">
+                      <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 border-2 border-blue-200 rounded-lg hover:bg-blue-100 transition-colors">
+                        <Image className="w-5 h-5" />
+                        <span className="text-sm font-medium">Upload Gambar</span>
+                      </div>
                       <input
                         type="file"
-                        accept="image/*"
                         className="hidden"
+                        accept="image/jpeg,image/png,image/webp,image/jpg"
                         disabled={isSaving}
                         onChange={(e) => {
                           const file = e.target.files?.[0];
@@ -386,48 +376,56 @@ export default function AddQuestionPage() {
                       />
                     </label>
                   )}
-                  
-                  <p className="text-[10px] text-[#94A3B8] mt-1">
-                    Format: JPG, PNG, WEBP. Maks 2MB
-                  </p>
+                  <p className="text-xs text-gray-500 mt-2">Format: JPG, PNG, WEBP. Maks 2MB</p>
                 </div>
 
-                {/* Textarea Pertanyaan */}
-                <textarea
-                  className="w-full border rounded-lg px-3 py-2 text-sm mb-3 focus:ring-2 focus:ring-[#295782] focus:border-transparent"
-                  placeholder="Tulis pertanyaan..."
-                  rows={3}
-                  value={q.question}
-                  onChange={(e) => handleQuestionChange(index, "question", e.target.value)}
-                  disabled={isSaving}
-                  required
-                />
+                {/* Question Text */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Pertanyaan
+                  </label>
+                  <textarea
+                    value={q.question}
+                    onChange={(e) => handleQuestionChange(index, "question", e.target.value)}
+                    disabled={isSaving}
+                    required
+                    rows={4}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Tulis pertanyaan di sini..."
+                  />
+                </div>
 
-                {/* Options Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Options */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                   {["A", "B", "C", "D"].map((opt) => (
-                    <input
-                      key={opt}
-                      type="text"
-                      placeholder={`Opsi ${opt}`}
-                      className="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[#295782] focus:border-transparent"
-                      value={q[`option${opt}` as keyof Question] as string}
-                      onChange={(e) => handleQuestionChange(index, `option${opt}` as keyof Question, e.target.value)}
-                      disabled={isSaving}
-                      required
-                    />
+                    <div key={opt}>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Opsi {opt}
+                      </label>
+                      <input
+                        type="text"
+                        value={q[`option${opt}` as keyof Question] as string}
+                        onChange={(e) => handleQuestionChange(index, `option${opt}` as keyof Question, e.target.value)}
+                        disabled={isSaving}
+                        required
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder={`Opsi ${opt}`}
+                      />
+                    </div>
                   ))}
                 </div>
 
-                {/* Answer Selection */}
-                <div className="mt-3">
-                  <label className="text-sm text-[#64748B] mr-2">Jawaban Benar:</label>
+                {/* Correct Answer */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Jawaban Benar:
+                  </label>
                   <select
-                    className="border rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-[#295782] focus:border-transparent"
                     value={q.answer}
                     onChange={(e) => handleQuestionChange(index, "answer", e.target.value)}
                     disabled={isSaving}
                     required
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">Pilih</option>
                     <option value="A">A</option>
@@ -436,6 +434,24 @@ export default function AddQuestionPage() {
                     <option value="D">D</option>
                   </select>
                 </div>
+
+                {/* ✅ NEW: Pembahasan Field */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Pembahasan (Opsional)
+                  </label>
+                  <textarea
+                    value={q.pembahasan}
+                    onChange={(e) => handleQuestionChange(index, "pembahasan", e.target.value)}
+                    disabled={isSaving}
+                    rows={4}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Tulis pembahasan jawaban di sini..."
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Pembahasan akan ditampilkan ke user setelah mengerjakan soal
+                  </p>
+                </div>
               </div>
             ))}
 
@@ -443,21 +459,20 @@ export default function AddQuestionPage() {
               type="button"
               onClick={addQuestion}
               disabled={isSaving}
-              className="flex items-center gap-2 text-[#295782] text-sm hover:underline mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
             >
-              <Plus className="w-4 h-4" /> Tambah Soal
+              <Plus className="w-5 h-5" />
+              Tambah Soal
             </button>
           </div>
 
-          <div className="pt-4 border-t">
-            <button
-              type="submit"
-              disabled={isSaving}
-              className="bg-[#295782] text-white px-6 py-2.5 rounded-lg hover:bg-[#295782]/90 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSaving ? "Menyimpan..." : "Simpan Semua Soal"}
-            </button>
-          </div>
+          <button
+            type="submit"
+            disabled={isSaving}
+            className="w-full py-3 bg-[#295782] text-white font-semibold rounded-lg hover:bg-[#1e3f5f] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSaving ? "Menyimpan..." : "Simpan Semua Soal"}
+          </button>
         </form>
       </div>
     </div>
