@@ -6,7 +6,6 @@ import { supabase } from "@/lib/supabase";
 import toast from "react-hot-toast";
 import useTryoutStore from '../../stores/tryoutStore';
 
-// ✅ UPDATED: Type Definition with pembahasan
 interface Question {
   question: string;
   optionA: string;
@@ -14,7 +13,7 @@ interface Question {
   optionC: string;
   optionD: string;
   answer: string;
-  pembahasan: string;  // ← NEW FIELD
+  pembahasan: string;
   image: File | null;
   image_url: string;
 }
@@ -26,7 +25,7 @@ const initialQuestion: Question = {
   optionC: "",
   optionD: "",
   answer: "",
-  pembahasan: "",  // ← NEW FIELD
+  pembahasan: "",
   image: null,
   image_url: "",
 };
@@ -76,7 +75,7 @@ export default function AddQuestionPage() {
             optionC: q.opsi_c || "",
             optionD: q.opsi_d || "",
             answer: q.jawaban_benar || "",
-            pembahasan: q.pembahasan || "",  // ← LOAD FROM DB
+            pembahasan: q.pembahasan || "",
             image: null,
             image_url: q.image_url || "",
           }));
@@ -258,7 +257,7 @@ export default function AddQuestionPage() {
           opsi_c: q.opsi_c,
           opsi_d: q.opsi_d,
           jawaban_benar: q.jawaban_benar,
-          pembahasan: q.pembahasan || null,  // ← KEEP EXISTING PEMBAHASAN
+          pembahasan: q.pembahasan || null,
           image_url: q.image_url || null,
         });
       });
@@ -274,7 +273,7 @@ export default function AddQuestionPage() {
           opsi_c: q.optionC,
           opsi_d: q.optionD,
           jawaban_benar: q.answer,
-          pembahasan: q.pembahasan || null,  // ← SAVE PEMBAHASAN
+          pembahasan: q.pembahasan || null,
           image_url: q.image_url || null,
         });
       });
@@ -435,7 +434,7 @@ export default function AddQuestionPage() {
                   </select>
                 </div>
 
-                {/* ✅ NEW: Pembahasan Field */}
+                {/* Pembahasan Field */}
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Pembahasan

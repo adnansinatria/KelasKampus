@@ -7,6 +7,9 @@ interface Question {
   optionC: string;
   optionD: string;
   answer: string;
+  pembahasan: string;
+  image?: File | null;
+  image_url?: string;
 }
 
 interface TryoutState {
@@ -17,7 +20,7 @@ interface TryoutState {
   };
   isInfoAdded: boolean;
   questionsByCategory: {
-    [kategoriId: string]: Question[]; // Contoh: { 'kpu': [soal1, soal2], 'lit-id': [soal3] }
+    [kategoriId: string]: Question[];
   };
   setTryoutInfo: (info: TryoutState['tryoutInfo']) => void;
   setIsInfoAdded: (status: boolean) => void;
@@ -28,25 +31,23 @@ interface TryoutState {
 const useTryoutStore = create<TryoutState>((set) => ({
   tryoutInfo: { id: null, name: "", tanggal: "" },
   isInfoAdded: false,
-  // 👇 BARU: Inisialisasi state soal sebagai objek kosong
   questionsByCategory: {},
 
   setTryoutInfo: (info) => set({ tryoutInfo: info }),
   setIsInfoAdded: (status) => set({ isInfoAdded: status }),
 
-  // 👇 BARU: Implementasi fungsi untuk menyimpan soal
   setQuestionsForCategory: (kategoriId, questions) =>
     set((state) => ({
       questionsByCategory: {
-        ...state.questionsByCategory, 
-        [kategoriId]: questions,      
+        ...state.questionsByCategory,
+        [kategoriId]: questions,
       },
     })),
 
   resetTryout: () => set({
     tryoutInfo: { id: null, name: "", tanggal: "" },
     isInfoAdded: false,
-    questionsByCategory: {}, // Jangan lupa reset soal juga
+    questionsByCategory: {},
   }),
 }));
 
