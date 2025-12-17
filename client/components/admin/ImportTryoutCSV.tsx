@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef} from "react";
+import { useState, useEffect, useRef } from "react";
 import { Upload, FileText, AlertCircle, CheckCircle, X } from "lucide-react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
@@ -42,7 +42,6 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Reset state when modal closes
   useEffect(() => {
     if (!isOpen) {
       setFile(null);
@@ -56,6 +55,35 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const convertToISODate = (dateStr: string): string | null => {
+    if (!dateStr) return null;
+    
+    const parts = dateStr.split(/[\/\-]/);
+    
+    if (parts.length !== 3) return null;
+    
+    const day = parts[0].padStart(2, '0');
+    const month = parts[1].padStart(2, '0');
+    const year = parts[2];
+    
+    if (year.length !== 4 || parseInt(month) > 12 || parseInt(day) > 31) {
+      return null;
+    }
+    
+    return `${year}-${month}-${day}`;
+  };
+
+  const formatDisplayDate = (isoDate: string): string => {
+    if (!isoDate) return "";
+    
+    const date = new Date(isoDate);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    
+    return `${day}/${month}/${year}`;
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = e.target.files?.[0];
@@ -149,16 +177,20 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
 
     const firstRow = rows[0];
     const nama_tryout = firstRow.nama_tryout?.trim();
-    const tanggal_ujian = firstRow.tanggal_ujian?.trim();
+    const tanggal_ujian_input = firstRow.tanggal_ujian?.trim();
     const durasi_menit = parseInt(firstRow.durasi_menit);
     const status = firstRow.status?.trim().toLowerCase();
+
+    const tanggal_ujian = convertToISODate(tanggal_ujian_input);
 
     if (!nama_tryout) {
       validationErrors.push("Nama tryout tidak boleh kosong");
     }
 
-    if (!tanggal_ujian) {
+    if (!tanggal_ujian_input) {
       validationErrors.push("Tanggal ujian tidak boleh kosong");
+    } else if (!tanggal_ujian) {
+      validationErrors.push("Format tanggal tidak valid. Gunakan format DD/MM/YYYY (contoh: 25/12/2025)");
     } else if (isDateBeforeToday(tanggal_ujian)) {
       validationErrors.push("Tanggal ujian tidak boleh sebelum hari ini");
     }
@@ -232,7 +264,7 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
 
       setPreviewData({
         nama_tryout,
-        tanggal_ujian,
+        tanggal_ujian: tanggal_ujian!,
         durasi_menit,
         status,
         questions: questionsByCategory,
@@ -250,7 +282,6 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
 
     const uploadPromise = (async () => {
       try {
-        // Validasi nama tryout duplikat
         const existingTryouts = await api.adminGetTryouts();
         const existingData = existingTryouts?.data || existingTryouts || [];
         const existingNames = existingData.map((t: any) =>
@@ -320,7 +351,6 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-        {/* Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between rounded-t-2xl">
           <div>
             <h2 className="text-xl font-bold text-[#1E293B]">Import Tryout dari CSV</h2>
@@ -337,9 +367,7 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
           </button>
         </div>
 
-        {/* Content */}
         <div className="p-6 space-y-6">
-          {/* Upload Section */}
           <div>
             <label className="block text-sm font-medium text-[#1E293B] mb-2">
               Upload File CSV atau Excel
@@ -366,7 +394,6 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
             </div>
           </div>
 
-          {/* Template Info */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <div className="flex items-start gap-3">
               <FileText className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
@@ -378,7 +405,7 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
                   Kolom wajib: <span className="font-mono">nama_tryout, tanggal_ujian, durasi_menit, status, kategori_id, soal_text, opsi_a, opsi_b, opsi_c, opsi_d, jawaban_benar</span>
                 </p>
                 <p className="text-xs text-blue-700 mb-1">
-                  <strong>Format tanggal:</strong> YYYY-MM-DD (contoh: 2025-12-25)
+                  <strong>Format tanggal:</strong> DD/MM/YYYY (contoh: 25/12/2025)
                 </p>
                 <p className="text-xs text-blue-700 mb-1">
                   <strong>Durasi:</strong> angka dalam menit (contoh: 180)
@@ -393,7 +420,6 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
             </div>
           </div>
 
-          {/* Error Display */}
           {errors.length > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-4">
               <div className="flex items-start gap-3">
@@ -414,7 +440,6 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
             </div>
           )}
 
-          {/* Preview Display */}
           {previewData && errors.length === 0 && (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4">
               <div className="flex items-start gap-3 mb-4">
@@ -426,7 +451,7 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
                       <strong>Nama Tryout:</strong> {previewData.nama_tryout}
                     </p>
                     <p>
-                      <strong>Tanggal Ujian:</strong> {previewData.tanggal_ujian}
+                      <strong>Tanggal Ujian:</strong> {formatDisplayDate(previewData.tanggal_ujian)}
                     </p>
                     <p>
                       <strong>Durasi:</strong> {previewData.durasi_menit} menit
