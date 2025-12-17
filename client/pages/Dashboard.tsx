@@ -167,46 +167,49 @@ export default function Dashboard() {
       const startTime = Date.now();
 
       if (!currentUserId) {
-        console.warn('⚠️ User ID not found for stats');
+        console.warn("⚠️ User ID not found for stats");
         setTryoutCount(0);
         return;
       }
 
       const { data: sessions, error } = await supabase
-        .from('tryout_sessions')
-        .select('tryout_id, kategori_id, session_id, status, completed_at')
-        .eq('user_id', currentUserId)
-        .eq('status', 'completed')
-        .order('completed_at', { ascending: false });
-
-      console.log('📊 Completed sessions:', sessions);
+        .from("tryout_sessions")
+        .select("tryout_id, kategori_id, status, completed_at")
+        .eq("user_id", currentUserId)
+        .eq("status", "completed")
+        .not("completed_at", "is", null)
+        .order("completed_at", { ascending: false });
 
       if (error) {
-        console.error('❌ Error fetching sessions:', error);
+        console.error("❌ Error fetching sessions:", error);
         setTryoutCount(0);
         return;
       }
 
       if (!sessions || sessions.length === 0) {
-        console.log('📊 No completed sessions yet');
+        console.log("📊 No completed sessions yet");
         setTryoutCount(0);
         return;
       }
 
+      console.log("📊 Completed sessions:", sessions);
+
       const tryoutGroups: Record<string, Set<string>> = {};
-      
-      sessions.forEach((session) => {
-        if (!tryoutGroups[session.tryout_id]) {
-          tryoutGroups[session.tryout_id] = new Set();
+
+      sessions.forEach((s) => {
+        if (!tryoutGroups[s.tryout_id]) {
+          tryoutGroups[s.tryout_id] = new Set<string>();
         }
-        tryoutGroups[session.tryout_id].add(session.kategori_id);
+        if (s.kategori_id) {
+          tryoutGroups[s.tryout_id].add(s.kategori_id);
+        }
       });
 
-      console.log('📊 Grouped by tryout:', 
+      console.log(
+        "📊 Grouped by tryout:",
         Object.entries(tryoutGroups).map(([id, cats]) => ({
           tryout_id: id,
           completed_categories: Array.from(cats),
-          count: cats.size
         }))
       );
 
@@ -217,13 +220,9 @@ export default function Dashboard() {
         const completedCategories = tryoutGroups[tryoutId];
 
         const { data: questions, error: qError } = await supabase
-          .from('questions')
-          .select('kategori_id')
-          .eq('tryout_id', tryoutId);
-
-        console.log(`🔍 Tryout ${tryoutId}:`, {
-          questions_count: questions?.length || 0,
-        });
+          .from("questions")
+          .select("kategori_id")
+          .eq("tryout_id", tryoutId);
 
         if (qError) {
           console.error(`❌ Error fetching questions for ${tryoutId}:`, qError);
@@ -235,44 +234,43 @@ export default function Dashboard() {
           continue;
         }
 
-        const totalCategories = new Set(questions.map(q => q.kategori_id));
-
-        console.log(`🔍 Tryout ${tryoutId} analysis:`, {
-          total_categories_needed: Array.from(totalCategories),
-          total_count: totalCategories.size,
-          completed_categories: Array.from(completedCategories),
-          completed_count: completedCategories.size,
-        });
-
-        const allCategoriesCompleted = Array.from(totalCategories).every(
-          cat => completedCategories.has(cat)
+        const totalCategories = new Set(
+          questions
+            .map((q) => q.kategori_id)
+            .filter((k) => !!k) as string[]
         );
 
-        if (allCategoriesCompleted) {
+        console.log(`🔍 Tryout ${tryoutId}:`, {
+          total_categories: Array.from(totalCategories),
+          completed_categories: Array.from(completedCategories),
+        });
+
+        const allCompleted = Array.from(totalCategories).every((cat) =>
+          completedCategories.has(cat)
+        );
+
+        if (allCompleted) {
           fullyCompletedCount++;
-          console.log(`✅ Tryout ${tryoutId} is FULLY COMPLETED!`);
+          console.log(`✅ Tryout ${tryoutId} FULLY COMPLETED`);
         } else {
-          const missing = Array.from(totalCategories).filter(cat => !completedCategories.has(cat));
-          console.log(`⏳ Tryout ${tryoutId} is INCOMPLETE. Missing: ${missing.join(', ')}`);
+          const missing = Array.from(totalCategories).filter(
+            (cat) => !completedCategories.has(cat)
+          );
+          console.log(
+            `⏳ Tryout ${tryoutId} INCOMPLETE, missing categories:`,
+            missing
+          );
         }
       }
 
-      console.log(`✅ Stats loaded in ${Date.now() - startTime}ms`);
-      console.log(`📊 Summary:`);
-      console.log(`   - Total completed sessions: ${sessions.length}`);
-      console.log(`   - Unique tryouts attempted: ${tryoutIds.length}`);
-      console.log(`   - FULLY completed tryouts: ${fullyCompletedCount}`);
-
+      console.log(
+        `✅ Stats loaded in ${Date.now() - startTime}ms, fullyCompletedCount =`,
+        fullyCompletedCount
+      );
       setTryoutCount(fullyCompletedCount);
-
     } catch (err: any) {
       console.error("❌ Error fetching stats:", err);
-      console.error("❌ Error stack:", err.stack);
       setTryoutCount(0);
-      
-      if (err.message === 'Request timeout') {
-        toast.error('Server lambat. Coba refresh halaman.');
-      }
     }
   };
 
@@ -356,6 +354,7 @@ export default function Dashboard() {
         console.warn('⚠️ User ID not found');
         return;
       }
+
 
       const { data, error } = await supabase
         .from('transactions')
