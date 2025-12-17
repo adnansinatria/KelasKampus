@@ -154,6 +154,28 @@ export default function ImportTryoutCSV() {
       validationErrors.push("Tanggal ujian tidak boleh kosong");
     }
 
+    if (tanggal_ujian) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const inputDate = new Date(tanggal_ujian);
+      
+      if (inputDate < today) {
+        validationErrors.push("Tanggal ujian tidak boleh sebelum hari ini");
+      }
+    }
+
+    if (!durasi_menit || durasi_menit <= 0) {
+      validationErrors.push("Durasi tryout tidak valid atau kosong");
+    }
+
+    if (!nama_tryout) {
+      validationErrors.push("Nama tryout tidak boleh kosong");
+    }
+
+    if (!tanggal_ujian) {
+      validationErrors.push("Tanggal ujian tidak boleh kosong");
+    }
+
     if (!["active", "inactive"].includes(status)) {
       validationErrors.push("Status harus 'active' atau 'inactive'");
     }
