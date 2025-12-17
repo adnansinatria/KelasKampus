@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef} from "react";
 import { Upload, FileText, AlertCircle, CheckCircle, X } from "lucide-react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
@@ -40,6 +40,8 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
   const [errors, setErrors] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Reset state when modal closes
   useEffect(() => {
     if (!isOpen) {
@@ -47,6 +49,9 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
       setPreviewData(null);
       setErrors([]);
       setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   }, [isOpen]);
 
@@ -66,6 +71,12 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
       parseExcel(uploadedFile);
     } else {
       toast.error("Format file harus .csv atau .xlsx");
+      setFile(null);
+      setPreviewData(null);
+      setErrors([]);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       return;
     }
   };
@@ -80,6 +91,10 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
       },
       error: (error) => {
         toast.error(`Error parsing CSV: ${error.message}`);
+        setFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
       },
     });
   };
@@ -97,6 +112,10 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
         validateAndPreview(jsonData as CSVRow[]);
       } catch (err: any) {
         toast.error(`Error parsing Excel: ${err.message}`);
+        setFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
       }
     };
     reader.readAsBinaryString(file);
@@ -327,6 +346,7 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
             </label>
             <div className="relative">
               <input
+                ref={fileInputRef}
                 type="file"
                 accept=".csv,.xlsx,.xls"
                 onChange={handleFileUpload}
