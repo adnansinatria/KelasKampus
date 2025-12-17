@@ -176,10 +176,10 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
     }
 
     const firstRow = rows[0];
-    const nama_tryout = firstRow.nama_tryout?.trim();
-    const tanggal_ujian_input = firstRow.tanggal_ujian?.trim();
-    const durasi_menit = parseInt(firstRow.durasi_menit);
-    const status = firstRow.status?.trim().toLowerCase();
+    const nama_tryout = String(firstRow.nama_tryout || "").trim();
+    const tanggal_ujian_input = String(firstRow.tanggal_ujian || "").trim();
+    const durasi_menit = parseInt(String(firstRow.durasi_menit || ""));
+    const status = String(firstRow.status || "").trim().toLowerCase();
 
     const tanggal_ujian = convertToISODate(tanggal_ujian_input);
 
@@ -208,48 +208,56 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
     rows.forEach((row, index) => {
       const rowNum = index + 2;
 
-      if (!row.kategori_id || !validCategories.includes(row.kategori_id.trim())) {
+      const kategori_id = String(row.kategori_id || "").trim();
+      const soal_text = String(row.soal_text || "").trim();
+      const opsi_a = String(row.opsi_a || "").trim();
+      const opsi_b = String(row.opsi_b || "").trim();
+      const opsi_c = String(row.opsi_c || "").trim();
+      const opsi_d = String(row.opsi_d || "").trim();
+      const jawaban_benar = String(row.jawaban_benar || "").toUpperCase();
+
+      if (!kategori_id || !validCategories.includes(kategori_id)) {
         validationErrors.push(
-          `Baris ${rowNum}: Kategori tidak valid "${row.kategori_id}". Harus salah satu dari: ${validCategories.join(", ")}`
+          `Baris ${rowNum}: Kategori tidak valid "${kategori_id}". Harus salah satu dari: ${validCategories.join(", ")}`
         );
       }
 
-      if (!row.soal_text?.trim()) {
+      if (!soal_text) {
         validationErrors.push(`Baris ${rowNum}: Soal text tidak boleh kosong`);
       }
 
-      if (!row.opsi_a?.trim()) {
+      if (!opsi_a) {
         validationErrors.push(`Baris ${rowNum}: Opsi A tidak boleh kosong`);
       }
-      if (!row.opsi_b?.trim()) {
+      if (!opsi_b) {
         validationErrors.push(`Baris ${rowNum}: Opsi B tidak boleh kosong`);
       }
-      if (!row.opsi_c?.trim()) {
+      if (!opsi_c) {
         validationErrors.push(`Baris ${rowNum}: Opsi C tidak boleh kosong`);
       }
-      if (!row.opsi_d?.trim()) {
+      if (!opsi_d) {
         validationErrors.push(`Baris ${rowNum}: Opsi D tidak boleh kosong`);
       }
 
       const validAnswers = ["A", "B", "C", "D"];
-      if (!validAnswers.includes(row.jawaban_benar?.toUpperCase())) {
+      if (!validAnswers.includes(jawaban_benar)) {
         validationErrors.push(
-          `Baris ${rowNum}: Jawaban benar harus A, B, C, atau D (sekarang: "${row.jawaban_benar}")`
+          `Baris ${rowNum}: Jawaban benar harus A, B, C, atau D (sekarang: "${jawaban_benar}")`
         );
       }
 
-      if (row.kategori_id) {
-        if (!questionsByCategory[row.kategori_id]) {
-          questionsByCategory[row.kategori_id] = [];
+      if (kategori_id) {
+        if (!questionsByCategory[kategori_id]) {
+          questionsByCategory[kategori_id] = [];
         }
 
-        questionsByCategory[row.kategori_id].push({
-          soal_text: row.soal_text,
-          opsi_a: row.opsi_a,
-          opsi_b: row.opsi_b,
-          opsi_c: row.opsi_c,
-          opsi_d: row.opsi_d,
-          jawaban_benar: row.jawaban_benar?.toUpperCase(),
+        questionsByCategory[kategori_id].push({
+          soal_text: soal_text,
+          opsi_a: opsi_a,
+          opsi_b: opsi_b,
+          opsi_c: opsi_c,
+          opsi_d: opsi_d,
+          jawaban_benar: jawaban_benar,
         });
       }
     });
