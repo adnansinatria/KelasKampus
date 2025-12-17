@@ -17,6 +17,7 @@ interface TryoutState {
     id: string | null;
     name: string;
     tanggal: string;
+    durasi: string;
   };
   isInfoAdded: boolean;
   questionsByCategory: {
@@ -29,7 +30,7 @@ interface TryoutState {
 }
 
 const useTryoutStore = create<TryoutState>((set) => ({
-  tryoutInfo: { id: null, name: "", tanggal: "" },
+  tryoutInfo: { id: null, name: "", tanggal: "", durasi: "" },
   isInfoAdded: false,
   questionsByCategory: {},
 
@@ -45,7 +46,7 @@ const useTryoutStore = create<TryoutState>((set) => ({
     })),
 
   resetTryout: () => set({
-    tryoutInfo: { id: null, name: "", tanggal: "" },
+    tryoutInfo: { id: null, name: "", tanggal: "", durasi: "" },
     isInfoAdded: false,
     questionsByCategory: {},
   }),

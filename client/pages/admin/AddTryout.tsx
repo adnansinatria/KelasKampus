@@ -8,6 +8,7 @@ import useTryoutStore from "../../stores/tryoutStore";
 export default function AddNewTryoutPage() {
   const navigate = useNavigate();
   const [isSaving, setIsSaving] = useState(false);
+  const [existingNames, setExistingNames] = useState<string[]>([]);
 
   const {
     tryoutInfo,
@@ -41,6 +42,38 @@ export default function AddNewTryoutPage() {
     },
   ];
 
+  // ✅ Helper: Get today's date in YYYY-MM-DD format
+  const getTodayDateString = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const day = String(today.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  // ✅ Validate date is not before today
+  const isDateBeforeToday = (dateStr: string) => {
+    if (!dateStr) return false;
+    const today = new Date(getTodayDateString());
+    const input = new Date(dateStr);
+    return input < today;
+  };
+
+  // ✅ Fetch existing tryout names on mount
+  useEffect(() => {
+    const fetchExisting = async () => {
+      try {
+        const res = await api.adminGetTryouts?.();
+        const data = res?.data || res || [];
+        const names = data.map((t: any) => t.nama_tryout?.toLowerCase().trim());
+        setExistingNames(names);
+      } catch (err: any) {
+        console.error("Gagal load daftar tryout:", err);
+      }
+    };
+    fetchExisting();
+  }, []);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setTryoutInfo({
@@ -49,14 +82,35 @@ export default function AddNewTryoutPage() {
     });
   };
 
-  // ✅ CHANGED: Validate minimal 1 soal + save to API
+  // ✅ Enhanced validation
   const handleSaveTryout = async () => {
-    if (!tryoutInfo.name || !tryoutInfo.tanggal) {
-      toast.error("Nama Tryout dan Tanggal Ujian wajib diisi.");
+    // Basic required fields
+    if (!tryoutInfo.name || !tryoutInfo.tanggal || !tryoutInfo.durasi) {
+      toast.error("Nama Tryout, Tanggal Ujian, dan Durasi wajib diisi.");
       return;
     }
 
-    // ✅ ADDED BACK: Question validation
+    // ✅ Validate date not before today
+    if (isDateBeforeToday(tryoutInfo.tanggal)) {
+      toast.error("Tanggal ujian tidak boleh sebelum hari ini.");
+      return;
+    }
+
+    // ✅ Validate unique name (case-insensitive)
+    const nameLower = tryoutInfo.name.trim().toLowerCase();
+    if (existingNames.includes(nameLower)) {
+      toast.error("Nama tryout sudah digunakan. Gunakan nama lain.");
+      return;
+    }
+
+    // ✅ Validate durasi is positive number
+    const durasi = Number(tryoutInfo.durasi);
+    if (!durasi || durasi <= 0) {
+      toast.error("Durasi harus berupa angka lebih dari 0 menit.");
+      return;
+    }
+
+    // Question validation
     if (Object.keys(questionsByCategory).length === 0) {
       toast.error("Minimal harus ada 1 kategori soal yang diisi.");
       return;
@@ -69,10 +123,10 @@ export default function AddNewTryoutPage() {
 
       try {
         const tryoutResponse = await api.adminCreateTryout({
-          nama_tryout: tryoutInfo.name,
+          nama_tryout: tryoutInfo.name.trim(),
           tanggal_ujian: tryoutInfo.tanggal,
           kategori: "umum",
-          durasi_menit: 180,
+          durasi_menit: durasi,
           status: "active",
         });
 
@@ -142,7 +196,7 @@ export default function AddNewTryoutPage() {
           </div>
         </div>
 
-        {/* Tryout Info Card - TIDAK DIUBAH */}
+        {/* Tryout Info Card */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">
           <h2 className="text-lg font-bold text-[#1E293B] mb-4">Informasi Tryout</h2>
           <div className="space-y-4">
@@ -169,6 +223,22 @@ export default function AddNewTryoutPage() {
                 name="tanggal"
                 value={tryoutInfo.tanggal}
                 onChange={handleInputChange}
+                min={getTodayDateString()}
+                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#295782]"
+                disabled={isSaving}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-[#1E293B] mb-2">
+                Durasi (menit) *
+              </label>
+              <input
+                type="number"
+                name="durasi"
+                value={tryoutInfo.durasi}
+                onChange={handleInputChange}
+                placeholder="Contoh: 180"
+                min={1}
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#295782]"
                 disabled={isSaving}
               />
@@ -189,8 +259,7 @@ export default function AddNewTryoutPage() {
                     return (
                       <Link
                         key={sub.id}
-                        to={`/admin-tryout/new/${sub.id}/questions/new`} 
-                        // ✅ CHANGED: Use 'new' sebagai placeholder untuk identify add mode
+                        to={`/admin-tryout/new/${sub.id}/questions/new`}
                         className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                       >
                         <span className="text-sm text-[#1E293B]">{sub.name}</span>
@@ -215,7 +284,7 @@ export default function AddNewTryoutPage() {
             </div>
             <button
               onClick={handleSaveTryout}
-              disabled={isSaving || !tryoutInfo.name || !tryoutInfo.tanggal}
+              disabled={isSaving || !tryoutInfo.name || !tryoutInfo.tanggal || !tryoutInfo.durasi}
               className="px-6 py-2 bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isSaving ? "Menyimpan..." : "Simpan Tryout"}

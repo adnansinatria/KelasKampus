@@ -74,15 +74,15 @@ export default function EditTryout() {
     setError(null);
 
     try {
-      console.log("🔍 Fetching tryout detail for edit:", id);
+      console.log("ðŸ” Fetching tryout detail for edit:", id);
 
-      console.log("🔄 Resetting store...");
+      console.log("ðŸ”„ Resetting store...");
       resetTryout();
 
       const tryoutResponse = await api.adminGetTryoutDetail(id!);
       const tryoutData = tryoutResponse?.data || tryoutResponse;
 
-      console.log("📊 Tryout data loaded:", tryoutData);
+      console.log("ðŸ“Š Tryout data loaded:", tryoutData);
 
       setTryoutInfo({
         id: tryoutData.id,
@@ -90,6 +90,7 @@ export default function EditTryout() {
         tanggal:
           tryoutData.tanggal_ujian?.split("T")[0] ||
           tryoutData.tanggal_ujian,
+        durasi: tryoutData.durasi_menit?.toString() || "180",
       });
 
       setOriginalName(tryoutData.nama_tryout || "");
@@ -98,15 +99,15 @@ export default function EditTryout() {
       const questionsResponse = await api.adminGetTryoutQuestions(id!);
       const questionsData = questionsResponse?.data || questionsResponse;
 
-      console.log("📊 Questions response:", questionsResponse);
-      console.log("📝 Questions data:", questionsData);
+      console.log("ðŸ“Š Questions response:", questionsResponse);
+      console.log("ðŸ“ Questions data:", questionsData);
 
       if (!Array.isArray(questionsData)) {
         throw new Error("Invalid questions data format - expected array");
       }
 
       console.log(
-        `📝 Loaded ${questionsData.length} questions for tryout ${id}`
+        `ðŸ“ Loaded ${questionsData.length} questions for tryout ${id}`
       );
 
       const questionsByKategori: Record<string, Question[]> = {};
@@ -133,15 +134,15 @@ export default function EditTryout() {
       Object.entries(questionsByKategori).forEach(
         ([kategoriId, questions]) => {
           console.log(
-            `✅ Setting ${questions.length} questions for kategori ${kategoriId}`
+            `âœ… Setting ${questions.length} questions for kategori ${kategoriId}`
           );
           setQuestionsForCategory(kategoriId, questions);
         }
       );
 
-      console.log("✅ All questions loaded to store");
+      console.log("âœ… All questions loaded to store");
     } catch (err: any) {
-      console.error("❌ Error:", err);
+      console.error("âŒ Error:", err);
       setError(err.message);
       toast.error(`Gagal memuat tryout: ${err.message}`);
     } finally {
@@ -155,7 +156,7 @@ export default function EditTryout() {
     }
 
     return () => {
-      console.log("🧹 Cleanup: Resetting store on unmount");
+      console.log("ðŸ§¹ Cleanup: Resetting store on unmount");
       resetTryout();
     };
   }, [id]);
@@ -198,7 +199,7 @@ export default function EditTryout() {
       return;
     }
 
-    // ✅ VALIDASI TANGGAL ≥ HARI INI
+    // âœ… VALIDASI TANGGAL â‰¥ HARI INI
     const selectedDate = new Date(tryoutInfo.tanggal);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -216,7 +217,7 @@ export default function EditTryout() {
       try {
         const { exists, error } = await checkDuplicateName(trimmedName, id!);
         if (error) {
-          console.error("❌ Error checking duplicate name:", error);
+          console.error("âŒ Error checking duplicate name:", error);
           toast.error("Gagal mengecek duplikat nama tryout.");
           return;
         }
@@ -227,7 +228,7 @@ export default function EditTryout() {
           return;
         }
       } catch (err: any) {
-        console.error("❌ Error checking duplicate:", err);
+        console.error("âŒ Error checking duplicate:", err);
         toast.error("Gagal mengecek duplikat nama tryout.");
         return;
       }
@@ -236,7 +237,7 @@ export default function EditTryout() {
     setIsSaving(true);
 
     const updatePromise = (async () => {
-      console.log("📝 Step 1: Updating tryout info via API...");
+      console.log("ðŸ“ Step 1: Updating tryout info via API...");
 
       await api.adminUpdateTryout(id!, {
         nama_tryout: trimmedName,
@@ -244,18 +245,18 @@ export default function EditTryout() {
         status: status,
       });
 
-      console.log("✅ Step 1: Info updated");
+      console.log("âœ… Step 1: Info updated");
 
-      console.log("📝 Step 2: Deleting old questions via API...");
+      console.log("ðŸ“ Step 2: Deleting old questions via API...");
       try {
         await api.adminDeleteQuestions(id!);
-        console.log("✅ Step 2: Old questions deleted");
+        console.log("âœ… Step 2: Old questions deleted");
       } catch (err) {
-        console.warn("⚠️ Warning: Failed to delete old questions:", err);
+        console.warn("âš ï¸ Warning: Failed to delete old questions:", err);
       }
 
       if (Object.keys(questionsByCategory).length > 0) {
-        console.log("📝 Step 3: Inserting new questions via API...");
+        console.log("ðŸ“ Step 3: Inserting new questions via API...");
         const questionsToInsert: any[] = [];
 
         Object.entries(questionsByCategory).forEach(
@@ -278,20 +279,20 @@ export default function EditTryout() {
           }
         );
 
-        console.log(`💾 Inserting ${questionsToInsert.length} questions...`);
+        console.log(`ðŸ’¾ Inserting ${questionsToInsert.length} questions...`);
         const withPembahasan = questionsToInsert.filter(
           (q) => q.pembahasan
         ).length;
         console.log(
-          `📊 Questions with pembahasan: ${withPembahasan} out of ${questionsToInsert.length}`
+          `ðŸ“Š Questions with pembahasan: ${withPembahasan} out of ${questionsToInsert.length}`
         );
 
         await api.adminBulkInsertQuestions(questionsToInsert);
 
-        console.log("✅ Step 3: New questions inserted");
+        console.log("âœ… Step 3: New questions inserted");
       }
 
-      console.log("🎉 All steps completed!");
+      console.log("ðŸŽ‰ All steps completed!");
       resetTryout();
       navigate("/admin-tryout");
     })();
@@ -464,7 +465,7 @@ export default function EditTryout() {
                       to={`/admin-tryout/${id}/${sub.id}/questions/new`}
                       className="px-4 py-2 text-sm bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90 transition-colors"
                     >
-                      {hasQuestions ? "✏️ Edit Soal" : "+ Tambah Soal"}
+                      {hasQuestions ? "âœï¸ Edit Soal" : "+ Tambah Soal"}
                     </Link>
                   </div>
                 );
