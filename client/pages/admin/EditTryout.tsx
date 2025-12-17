@@ -1,13 +1,11 @@
-// src/pages/admin/EditTryout.tsx - FULL CODE WITH IMAGE SUPPORT AND PEMBAHASAN
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { ArrowLeft, Save } from "lucide-react";
 import useTryoutStore from "../../stores/tryoutStore";
 import toast from "react-hot-toast";
 import { api } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
 
-
-// ✅ Interface for Question with image support AND PEMBAHASAN
 interface Question {
   id?: string;
   question: string;
@@ -16,11 +14,10 @@ interface Question {
   optionC: string;
   optionD: string;
   answer: string;
-  pembahasan: string;  // ✅ ADDED
+  pembahasan: string;
   image: File | null;
   image_url: string;
 }
-
 
 const CATEGORIES = [
   {
@@ -45,6 +42,14 @@ const CATEGORIES = [
   },
 ];
 
+// Helper: today in YYYY-MM-DD 
+const getTodayDate = () => {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 export default function EditTryout() {
   const { id } = useParams<{ id: string }>();
@@ -53,76 +58,63 @@ export default function EditTryout() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("active");
-
+  const [originalName, setOriginalName] = useState(""); 
 
   const {
     tryoutInfo,
     setTryoutInfo,
     questionsByCategory,
     setQuestionsForCategory,
-    resetTryout
+    resetTryout,
   } = useTryoutStore();
 
-
-  // ✅ CHANGED: Fetch tryout data via API with image support AND PEMBAHASAN
+  // Fetch detail tryout + soal
   const fetchTryoutDetail = async () => {
     setIsLoading(true);
     setError(null);
 
-
     try {
       console.log("🔍 Fetching tryout detail for edit:", id);
 
-
-      // ✅ STEP 0: RESET STORE SEBELUM FETCH DATA BARU
       console.log("🔄 Resetting store...");
       resetTryout();
 
-
-      // ✅ CHANGED: Fetch from API instead of supabase
       const tryoutResponse = await api.adminGetTryoutDetail(id!);
       const tryoutData = tryoutResponse?.data || tryoutResponse;
 
-
       console.log("📊 Tryout data loaded:", tryoutData);
-
 
       setTryoutInfo({
         id: tryoutData.id,
         name: tryoutData.nama_tryout,
-        tanggal: tryoutData.tanggal_ujian?.split("T")[0] || tryoutData.tanggal_ujian,
+        tanggal:
+          tryoutData.tanggal_ujian?.split("T")[0] ||
+          tryoutData.tanggal_ujian,
       });
 
-
+      setOriginalName(tryoutData.nama_tryout || "");
       setStatus(tryoutData.status || "active");
-
 
       const questionsResponse = await api.adminGetTryoutQuestions(id!);
       const questionsData = questionsResponse?.data || questionsResponse;
 
-
       console.log("📊 Questions response:", questionsResponse);
       console.log("📝 Questions data:", questionsData);
 
-
-      // ✅ Ensure questionsData is array
       if (!Array.isArray(questionsData)) {
-        throw new Error('Invalid questions data format - expected array');
+        throw new Error("Invalid questions data format - expected array");
       }
 
+      console.log(
+        `📝 Loaded ${questionsData.length} questions for tryout ${id}`
+      );
 
-      console.log(`📝 Loaded ${questionsData.length} questions for tryout ${id}`);
-
-
-      // ✅ Group questions by kategori_id WITH IMAGE SUPPORT AND PEMBAHASAN
       const questionsByKategori: Record<string, Question[]> = {};
-
 
       questionsData.forEach((q: any) => {
         if (!questionsByKategori[q.kategori_id]) {
           questionsByKategori[q.kategori_id] = [];
         }
-
 
         questionsByKategori[q.kategori_id].push({
           id: q.id,
@@ -132,21 +124,20 @@ export default function EditTryout() {
           optionC: q.opsi_c || "",
           optionD: q.opsi_d || "",
           answer: q.jawaban_benar || "",
-          pembahasan: q.pembahasan || "",  // ✅ ADDED
-          image: null, // ✅ No file object in edit mode
-          image_url: q.image_url || "", // ✅ Load existing image URL
+          pembahasan: q.pembahasan || "",
+          image: null,
+          image_url: q.image_url || "",
         });
       });
 
-
-      // ✅ Set questions to store
-      Object.entries(questionsByKategori).forEach(([kategoriId, questions]) => {
-        console.log(
-          `✅ Setting ${questions.length} questions for kategori ${kategoriId}`
-        );
-        setQuestionsForCategory(kategoriId, questions);
-      });
-
+      Object.entries(questionsByKategori).forEach(
+        ([kategoriId, questions]) => {
+          console.log(
+            `✅ Setting ${questions.length} questions for kategori ${kategoriId}`
+          );
+          setQuestionsForCategory(kategoriId, questions);
+        }
+      );
 
       console.log("✅ All questions loaded to store");
     } catch (err: any) {
@@ -158,21 +149,16 @@ export default function EditTryout() {
     }
   };
 
-
-  // ✅ Re-fetch setiap kali ID berubah
   useEffect(() => {
     if (id) {
       fetchTryoutDetail();
     }
 
-
-    // ✅ Cleanup: Reset store saat component unmount
     return () => {
       console.log("🧹 Cleanup: Resetting store on unmount");
       resetTryout();
     };
   }, [id]);
-
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -182,34 +168,84 @@ export default function EditTryout() {
     });
   };
 
+  // helper cek nama duplikat di Supabase (exclude current id)
+  const checkDuplicateName = async (name: string, currentId: string) => {
+    const { data, error } = await supabase
+      .from("tryouts")
+      .select("id, nama_tryout")
+      .ilike("nama_tryout", name)
+      .neq("id", currentId)
+      .limit(1);
 
-  // ✅ CHANGED: Use API to update tryout WITH IMAGE SUPPORT AND PEMBAHASAN
+    if (error) return { exists: false, error };
+
+    if (data && data.length > 0) {
+      return { exists: true, error: null };
+    }
+    return { exists: false, error: null };
+  };
+
+  // Update tryout + VALIDASI
   const handleUpdateTryout = async () => {
     if (!tryoutInfo.name || !tryoutInfo.tanggal) {
       toast.error("Nama Tryout dan Tanggal Ujian wajib diisi.");
       return;
     }
 
+    const trimmedName = tryoutInfo.name.trim();
+    if (!trimmedName) {
+      toast.error("Nama Tryout tidak boleh kosong.");
+      return;
+    }
+
+    // ✅ VALIDASI TANGGAL ≥ HARI INI
+    const selectedDate = new Date(tryoutInfo.tanggal);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (selectedDate < today) {
+      toast.error("Tanggal ujian tidak boleh sebelum hari ini.");
+      return;
+    }
+
+    // VALIDASI NAMA UNIK (case-insensitive) kalau nama berubah
+    const nameChanged =
+      trimmedName.toLowerCase() !== (originalName || "").trim().toLowerCase();
+
+    if (nameChanged) {
+      try {
+        const { exists, error } = await checkDuplicateName(trimmedName, id!);
+        if (error) {
+          console.error("❌ Error checking duplicate name:", error);
+          toast.error("Gagal mengecek duplikat nama tryout.");
+          return;
+        }
+        if (exists) {
+          toast.error(
+            `Nama tryout "${trimmedName}" sudah digunakan. Gunakan nama lain.`
+          );
+          return;
+        }
+      } catch (err: any) {
+        console.error("❌ Error checking duplicate:", err);
+        toast.error("Gagal mengecek duplikat nama tryout.");
+        return;
+      }
+    }
 
     setIsSaving(true);
-
 
     const updatePromise = (async () => {
       console.log("📝 Step 1: Updating tryout info via API...");
 
-
-      // ✅ CHANGED: Use API to update tryout
       await api.adminUpdateTryout(id!, {
-        nama_tryout: tryoutInfo.name,
+        nama_tryout: trimmedName,
         tanggal_ujian: tryoutInfo.tanggal,
         status: status,
       });
 
-
       console.log("✅ Step 1: Info updated");
 
-
-      // ✅ CHANGED: Use API to delete old questions
       console.log("📝 Step 2: Deleting old questions via API...");
       try {
         await api.adminDeleteQuestions(id!);
@@ -218,60 +254,56 @@ export default function EditTryout() {
         console.warn("⚠️ Warning: Failed to delete old questions:", err);
       }
 
-
-      // ✅ Insert new questions WITH IMAGE SUPPORT AND PEMBAHASAN
       if (Object.keys(questionsByCategory).length > 0) {
         console.log("📝 Step 3: Inserting new questions via API...");
         const questionsToInsert: any[] = [];
 
-
-        Object.entries(questionsByCategory).forEach(([kategoriId, questions]) => {
-          questions.forEach((q: any, index) => {
-            questionsToInsert.push({
-              tryout_id: id,
-              kategori_id: kategoriId,
-              urutan: index + 1,
-              soal_text: q.question,
-              opsi_a: q.optionA,
-              opsi_b: q.optionB,
-              opsi_c: q.optionC,
-              opsi_d: q.optionD,
-              jawaban_benar: q.answer,
-              pembahasan: q.pembahasan || null, // ✅ ADDED
-              image_url: q.image_url || null,
+        Object.entries(questionsByCategory).forEach(
+          ([kategoriId, questions]) => {
+            questions.forEach((q: any, index) => {
+              questionsToInsert.push({
+                tryout_id: id,
+                kategori_id: kategoriId,
+                urutan: index + 1,
+                soal_text: q.question,
+                opsi_a: q.optionA,
+                opsi_b: q.optionB,
+                opsi_c: q.optionC,
+                opsi_d: q.optionD,
+                jawaban_benar: q.answer,
+                pembahasan: q.pembahasan || null,
+                image_url: q.image_url || null,
+              });
             });
-          });
-        });
-
+          }
+        );
 
         console.log(`💾 Inserting ${questionsToInsert.length} questions...`);
-        
-        // ✅ DEBUG: Check pembahasan in data
-        const withPembahasan = questionsToInsert.filter(q => q.pembahasan).length;
-        console.log(`📊 Questions with pembahasan: ${withPembahasan} out of ${questionsToInsert.length}`);
+        const withPembahasan = questionsToInsert.filter(
+          (q) => q.pembahasan
+        ).length;
+        console.log(
+          `📊 Questions with pembahasan: ${withPembahasan} out of ${questionsToInsert.length}`
+        );
 
-
-        // ✅ CHANGED: Use API to insert questions
         await api.adminBulkInsertQuestions(questionsToInsert);
-
 
         console.log("✅ Step 3: New questions inserted");
       }
-
 
       console.log("🎉 All steps completed!");
       resetTryout();
       navigate("/admin-tryout");
     })();
 
-
-    toast.promise(updatePromise, {
-      loading: "Menyimpan perubahan...",
-      success: "Tryout berhasil diupdate!",
-      error: (err) => `Gagal mengupdate: ${err.message}`,
-    }).finally(() => setIsSaving(false));
+    toast
+      .promise(updatePromise, {
+        loading: "Menyimpan perubahan...",
+        success: "Tryout berhasil diupdate!",
+        error: (err) => `Gagal mengupdate: ${err.message}`,
+      })
+      .finally(() => setIsSaving(false));
   };
-
 
   if (isLoading) {
     return (
@@ -283,7 +315,6 @@ export default function EditTryout() {
       </div>
     );
   }
-
 
   if (error) {
     return (
@@ -302,7 +333,6 @@ export default function EditTryout() {
     );
   }
 
-
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
       <button
@@ -314,14 +344,12 @@ export default function EditTryout() {
         Kembali ke Daftar Tryout
       </button>
 
-
       {/* Bagian 1: Informasi Tryout */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
         <h2 className="text-xl font-bold text-[#1E293B] mb-2">Edit Tryout</h2>
         <p className="text-sm text-[#64748B] mb-6">
           Edit informasi tryout dan kelola soal-soal yang ada
         </p>
-
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
@@ -337,8 +365,10 @@ export default function EditTryout() {
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#295782] focus:border-transparent disabled:bg-gray-100"
               placeholder="Contoh: Tryout SNBT 2025 #1"
             />
+            <p className="text-xs text-gray-500 mt-1">
+              Nama tryout harus unik, tidak boleh sama dengan tryout lain.
+            </p>
           </div>
-
 
           <div>
             <label className="block text-sm font-medium text-[#64748B] mb-2">
@@ -350,11 +380,14 @@ export default function EditTryout() {
               value={tryoutInfo.tanggal}
               onChange={handleInputChange}
               disabled={isSaving}
+              min={getTodayDate()}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#295782] focus:border-transparent disabled:bg-gray-100"
             />
+            <p className="text-xs text-gray-500 mt-1">
+              Tanggal tidak boleh sebelum hari ini.
+            </p>
           </div>
         </div>
-
 
         {/* Status Toggle */}
         <div className="mb-4">
@@ -386,11 +419,10 @@ export default function EditTryout() {
             </label>
           </div>
           <p className="text-xs text-[#64748B] mt-1">
-            Tryout yang nonaktif tidak akan ditampilkan ke siswa
+            Tryout yang nonaktif tidak akan ditampilkan ke siswa.
           </p>
         </div>
       </div>
-
 
       {/* Bagian 2: Kelola Kategori Soal */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
@@ -401,7 +433,6 @@ export default function EditTryout() {
           Klik "Tambah/Edit Soal" untuk mengubah soal di kategori tertentu
         </p>
 
-
         {CATEGORIES.map((cat) => (
           <div key={cat.name} className="mb-6">
             <h4 className="text-md font-semibold text-[#295782] mb-3">
@@ -411,8 +442,6 @@ export default function EditTryout() {
               {cat.subcategories.map((sub) => {
                 const savedQuestions = questionsByCategory[sub.id] || [];
                 const hasQuestions = savedQuestions.length > 0;
-                const hasImages = savedQuestions.some((q: any) => q.image_url);
-
 
                 return (
                   <div
@@ -444,7 +473,6 @@ export default function EditTryout() {
           </div>
         ))}
       </div>
-
 
       {/* Action Buttons */}
       <div className="flex justify-end gap-3">

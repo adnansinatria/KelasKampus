@@ -1,228 +1,252 @@
 import { useState, useEffect } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft } from "lucide-react";
-import toast from "react-hot-toast";
-import { api } from "@/lib/api";
-import useTryoutStore from "../../stores/tryoutStore";
+import { toast } from "react-hot-toast";
 
-export default function AddNewTryoutPage() {
+export default function AddTryout() {
   const navigate = useNavigate();
-  const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    nama_tryout: "",
+    tanggal_ujian: "",
+    kategori: "",
+    durasi_menit: "",
+    status: "draft",
+  });
 
-  const {
-    tryoutInfo,
-    setTryoutInfo,
-    questionsByCategory,
-    resetTryout
-  } = useTryoutStore();
-
-  const categories = [
-    { 
-      name: "Tes Potensi Skolastik", 
-      subcategories: [
-        { id: "kpu", name: "Kemampuan Penalaran Umum" }, 
-        { id: "ppu", name: "Pengetahuan dan Pemahaman Umum" },
-        { id: "kmbm", name: "Kemampuan Memahami Bacaan dan Menulis" }, 
-        { id: "pk", name: "Pengetahuan Kuantitatif" },
-      ],
-    },
-    { 
-      name: "Tes Literasi Bahasa", 
-      subcategories: [
-        { id: "lit-id", name: "Literasi dalam Bahasa Indonesia" }, 
-        { id: "lit-en", name: "Literasi dalam Bahasa Inggris" },
-      ],
-    },
-    { 
-      name: "Tes Penalaran Matematika", 
-      subcategories: [
-        { id: "pm", name: "Penalaran Matematika" }
-      ],
-    },
-  ];
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setTryoutInfo({
-      ...tryoutInfo,
-      [name]: value,
-    });
+  // ✅ Get today's date in YYYY-MM-DD format (local timezone)
+  const getTodayDate = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   };
 
-  // ✅ CHANGED: Validate minimal 1 soal + save to API
-  const handleSaveTryout = async () => {
-    if (!tryoutInfo.name || !tryoutInfo.tanggal) {
-      toast.error("Nama Tryout dan Tanggal Ujian wajib diisi.");
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // ✅ VALIDATION 1: Check all fields
+    if (!formData.nama_tryout.trim()) {
+      toast.error("Nama tryout harus diisi!");
       return;
     }
 
-    // ✅ ADDED BACK: Question validation
-    if (Object.keys(questionsByCategory).length === 0) {
-      toast.error("Minimal harus ada 1 kategori soal yang diisi.");
+    if (!formData.tanggal_ujian) {
+      toast.error("Tanggal ujian harus diisi!");
       return;
     }
 
-    setIsSaving(true);
+    if (!formData.kategori) {
+      toast.error("Kategori harus dipilih!");
+      return;
+    }
 
-    const savePromise = (async () => {
-      console.log("📝 Step 1: Creating tryout via API...");
+    if (!formData.durasi_menit || parseInt(formData.durasi_menit) <= 0) {
+      toast.error("Durasi harus diisi dengan angka positif!");
+      return;
+    }
 
-      try {
-        const tryoutResponse = await api.adminCreateTryout({
-          nama_tryout: tryoutInfo.name,
-          tanggal_ujian: tryoutInfo.tanggal,
-          kategori: "umum",
-          durasi_menit: 180,
-          status: "active",
-        });
+    // ✅ VALIDATION 2: Check date not in the past
+    const selectedDate = new Date(formData.tanggal_ujian);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Reset time to compare dates only
 
-        const tryoutData = tryoutResponse?.data || tryoutResponse;
-        const tryoutId = tryoutData.id;
+    if (selectedDate < today) {
+      toast.error("Tanggal ujian tidak boleh sebelum hari ini!");
+      return;
+    }
 
-        console.log("✅ Step 1: Tryout created with ID:", tryoutId);
+    setIsLoading(true);
 
-        console.log("📝 Step 2: Inserting questions via API...");
+    try {
+      // ✅ VALIDATION 3: Check duplicate nama_tryout
+      const { data: existingTryout, error: checkError } = await supabase
+        .from("tryouts")
+        .select("nama_tryout")
+        .ilike("nama_tryout", formData.nama_tryout.trim())
+        .limit(1);
 
-        const questionsToInsert: any[] = [];
-        Object.entries(questionsByCategory).forEach(([kategoriId, questions]) => {
-          questions.forEach((q: any) => {
-            questionsToInsert.push({
-              tryout_id: tryoutId,
-              kategori_id: kategoriId,
-              soal_text: q.question,
-              opsi_a: q.optionA,
-              opsi_b: q.optionB,
-              opsi_c: q.optionC,
-              opsi_d: q.optionD,
-              jawaban_benar: q.answer,
-            });
-          });
-        });
-
-        await api.adminBulkInsertQuestions(questionsToInsert);
-
-        console.log("✅ Step 2: Questions inserted");
-        console.log("🎉 Tryout saved successfully!");
-
-        resetTryout();
-        navigate("/admin-tryout");
-      } catch (err: any) {
-        console.error("❌ Error:", err);
-        throw err;
+      if (checkError) {
+        console.error("Error checking duplicate:", checkError);
+        toast.error("Gagal memeriksa duplikat nama tryout");
+        return;
       }
-    })();
 
-    toast.promise(savePromise, {
-      loading: 'Menyimpan tryout...',
-      success: 'Tryout berhasil dibuat!',
-      error: (err) => `Gagal menyimpan: ${err.message}`,
-    }).finally(() => setIsSaving(false));
-  };
+      if (existingTryout && existingTryout.length > 0) {
+        toast.error(`Nama tryout "${formData.nama_tryout}" sudah digunakan! Gunakan nama lain.`);
+        return;
+      }
 
-  const getTotalQuestions = () => {
-    return Object.values(questionsByCategory).reduce((sum, questions) => sum + questions.length, 0);
+      // ✅ All validations passed, create tryout
+      const { data, error } = await supabase
+        .from("tryouts")
+        .insert([
+          {
+            nama_tryout: formData.nama_tryout.trim(),
+            tanggal_ujian: formData.tanggal_ujian,
+            kategori: formData.kategori,
+            durasi_menit: parseInt(formData.durasi_menit),
+            status: formData.status,
+          },
+        ])
+        .select();
+
+      if (error) throw error;
+
+      toast.success("Tryout berhasil ditambahkan!");
+      navigate("/admin/tryout");
+    } catch (error: any) {
+      console.error("Error adding tryout:", error);
+      toast.error(error.message || "Gagal menambahkan tryout");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#F8FBFF] to-[#EFF6FF] p-6">
-      <div className="max-w-4xl mx-auto">
-        {/* Header - TIDAK DIUBAH */}
-        <div className="flex items-center gap-4 mb-8">
-          <Link
-            to="/admin-tryout"
-            className="p-2 rounded-lg hover:bg-white/50 transition-colors"
-          >
-            <ArrowLeft className="w-5 h-5 text-[#64748B]" />
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold text-[#1E293B]">Buat Tryout Baru</h1>
-            <p className="text-sm text-[#64748B] mt-1">
-              Isi informasi tryout dan tambahkan soal per kategori
-            </p>
-          </div>
-        </div>
+    <div className="container mx-auto p-6">
+      <Button
+        variant="ghost"
+        onClick={() => navigate("/admin/tryout")}
+        className="mb-4"
+      >
+        <ArrowLeft className="mr-2 h-4 w-4" />
+        Kembali
+      </Button>
 
-        {/* Tryout Info Card - TIDAK DIUBAH */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">
-          <h2 className="text-lg font-bold text-[#1E293B] mb-4">Informasi Tryout</h2>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-[#1E293B] mb-2">
-                Nama Tryout *
-              </label>
-              <input
-                type="text"
-                name="name"
-                value={tryoutInfo.name}
-                onChange={handleInputChange}
-                placeholder="Contoh: Tryout UTBK 2025 #1"
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#295782]"
-                disabled={isSaving}
+      <Card>
+        <CardHeader>
+          <CardTitle>Tambah Tryout Baru</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Nama Tryout */}
+            <div className="space-y-2">
+              <Label htmlFor="nama_tryout">
+                Nama Tryout <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="nama_tryout"
+                value={formData.nama_tryout}
+                onChange={(e) =>
+                  setFormData({ ...formData, nama_tryout: e.target.value })
+                }
+                placeholder="Contoh: Tryout SNBT 2025 #1"
+                required
               />
+              <p className="text-xs text-gray-500">
+                Nama tryout harus unik dan tidak boleh duplikat
+              </p>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-[#1E293B] mb-2">
-                Tanggal Ujian *
-              </label>
-              <input
+
+            {/* Tanggal Ujian */}
+            <div className="space-y-2">
+              <Label htmlFor="tanggal_ujian">
+                Tanggal Ujian <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="tanggal_ujian"
                 type="date"
-                name="tanggal"
-                value={tryoutInfo.tanggal}
-                onChange={handleInputChange}
-                className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#295782]"
-                disabled={isSaving}
+                value={formData.tanggal_ujian}
+                onChange={(e) =>
+                  setFormData({ ...formData, tanggal_ujian: e.target.value })
+                }
+                min={getTodayDate()} // ✅ Set minimum date to today
+                required
+              />
+              <p className="text-xs text-gray-500">
+                Tanggal tidak boleh sebelum hari ini
+              </p>
+            </div>
+
+            {/* Kategori */}
+            <div className="space-y-2">
+              <Label htmlFor="kategori">
+                Kategori <span className="text-red-500">*</span>
+              </Label>
+              <Select
+                value={formData.kategori}
+                onValueChange={(value) =>
+                  setFormData({ ...formData, kategori: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih kategori" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="SNBT">SNBT</SelectItem>
+                  <SelectItem value="UTBK">UTBK</SelectItem>
+                  <SelectItem value="umum">Umum</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Durasi */}
+            <div className="space-y-2">
+              <Label htmlFor="durasi_menit">
+                Durasi (menit) <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="durasi_menit"
+                type="number"
+                value={formData.durasi_menit}
+                onChange={(e) =>
+                  setFormData({ ...formData, durasi_menit: e.target.value })
+                }
+                placeholder="120"
+                min="1"
+                required
               />
             </div>
-          </div>
-        </div>
 
-        {/* Categories List - TIDAK DIUBAH */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">
-          <h2 className="text-lg font-bold text-[#1E293B] mb-4">Kategori Soal</h2>
-          <div className="space-y-4">
-            {categories.map((category) => (
-              <div key={category.name} className="border-b border-gray-100 pb-4 last:border-0">
-                <h3 className="text-sm font-semibold text-[#1E293B] mb-2">{category.name}</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {category.subcategories.map((sub) => {
-                    const count = questionsByCategory[sub.id]?.length || 0;
-                    return (
-                      <Link
-                        key={sub.id}
-                        to={`/admin-tryout/new/${sub.id}/questions/new`} 
-                        // ✅ CHANGED: Use 'new' sebagai placeholder untuk identify add mode
-                        className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                      >
-                        <span className="text-sm text-[#1E293B]">{sub.name}</span>
-                        <span className="text-xs px-2 py-1 rounded bg-[#295782]/10 text-[#295782] font-medium">
-                          {count} soal
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Summary Card - TIDAK DIUBAH */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-[#64748B]">Total Soal</p>
-              <p className="text-2xl font-bold text-[#1E293B]">{getTotalQuestions()} Soal</p>
+            {/* Status */}
+            <div className="space-y-2">
+              <Label htmlFor="status">Status</Label>
+              <Select
+                value={formData.status}
+                onValueChange={(value) =>
+                  setFormData({ ...formData, status: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="archived">Archived</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <button
-              onClick={handleSaveTryout}
-              disabled={isSaving || !tryoutInfo.name || !tryoutInfo.tanggal}
-              className="px-6 py-2 bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {isSaving ? "Menyimpan..." : "Simpan Tryout"}
-            </button>
-          </div>
-        </div>
-      </div>
+
+            <div className="flex gap-2">
+              <Button type="submit" disabled={isLoading}>
+                {isLoading ? "Menyimpan..." : "Simpan Tryout"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => navigate("/admin/tryout")}
+              >
+                Batal
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }
