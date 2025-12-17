@@ -177,7 +177,7 @@ export default function Dashboard() {
       // ✅ Get all tryout_results for this user
       const { data: results, error } = await supabase
         .from('tryout_results')
-        .select('tryout_id, kategori_id')
+        .select('tryout_id')
         .eq('user_id', currentUserId);
 
       if (error) {
@@ -192,55 +192,18 @@ export default function Dashboard() {
         return;
       }
 
-      // ✅ Group by tryout_id to check completion
-      const tryoutGroups: Record<string, Set<string>> = {};
-      
-      results.forEach((result) => {
-        if (!tryoutGroups[result.tryout_id]) {
-          tryoutGroups[result.tryout_id] = new Set();
-        }
-        tryoutGroups[result.tryout_id].add(result.kategori_id);
-      });
-
-      // ✅ Count only FULLY completed tryouts
-      let completedTryouts = 0;
-
-      for (const tryoutId of Object.keys(tryoutGroups)) {
-        const completedCategories = tryoutGroups[tryoutId];
-
-        // Get total categories for this tryout
-        const { data: questions, error: qError } = await supabase
-          .from('questions')
-          .select('kategori_id')
-          .eq('tryout_id', tryoutId);
-
-        if (qError || !questions) continue;
-
-        const totalCategories = new Set(questions.map(q => q.kategori_id));
-
-        // Check if ALL categories are completed
-        const isFullyCompleted = Array.from(totalCategories).every(
-          cat => completedCategories.has(cat)
-        );
-
-        if (isFullyCompleted) {
-          completedTryouts++;
-        }
-      }
+      // ✅ Count UNIQUE tryout_id (any tryout with at least 1 completed subtest)
+      const uniqueTryoutIds = new Set(results.map(r => r.tryout_id));
+      const completedCount = uniqueTryoutIds.size;
 
       console.log(`✅ Stats loaded in ${Date.now() - startTime}ms`);
-      console.log(`📊 User completed ${results.length} subtests from ${Object.keys(tryoutGroups).length} tryouts`);
-      console.log(`📊 FULLY completed tryouts: ${completedTryouts}`);
+      console.log(`📊 User completed ${results.length} subtests from ${completedCount} tryouts`);
 
-      setTryoutCount(completedTryouts);
+      setTryoutCount(completedCount);
 
     } catch (err: any) {
       console.error("❌ Error fetching stats:", err);
       setTryoutCount(0);
-      
-      if (err.message === 'Request timeout') {
-        toast.error('Server lambat. Coba refresh halaman.');
-      }
     }
   };
 
