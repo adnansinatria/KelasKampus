@@ -172,13 +172,12 @@ export default function Dashboard() {
         return;
       }
 
+      // ✅ FIXED: Only filter by status (no completed_at check)
       const { data: sessions, error } = await supabase
         .from("tryout_sessions")
-        .select("tryout_id, kategori_id, status, completed_at")
+        .select("tryout_id, kategori_id, status")
         .eq("user_id", currentUserId)
-        .eq("status", "completed")
-        .not("completed_at", "is", null)
-        .order("completed_at", { ascending: false });
+        .eq("status", "completed");
 
       if (error) {
         console.error("❌ Error fetching sessions:", error);
@@ -194,82 +193,61 @@ export default function Dashboard() {
 
       console.log("📊 Completed sessions:", sessions);
 
+      // Group by tryout_id
       const tryoutGroups: Record<string, Set<string>> = {};
-
-      sessions.forEach((s) => {
+      for (const s of sessions) {
+        if (!s.tryout_id) continue;
         if (!tryoutGroups[s.tryout_id]) {
           tryoutGroups[s.tryout_id] = new Set<string>();
         }
         if (s.kategori_id) {
           tryoutGroups[s.tryout_id].add(s.kategori_id);
         }
-      });
+      }
 
-      console.log(
-        "📊 Grouped by tryout:",
-        Object.entries(tryoutGroups).map(([id, cats]) => ({
-          tryout_id: id,
-          completed_categories: Array.from(cats),
-        }))
-      );
+      console.log("📊 Grouped by tryout:", tryoutGroups);
 
+      // Check completion for each tryout
       let fullyCompletedCount = 0;
       const tryoutIds = Object.keys(tryoutGroups);
 
       for (const tryoutId of tryoutIds) {
         const completedCategories = tryoutGroups[tryoutId];
 
-        const { data: questions, error: qError } = await supabase
+        const { data: questions } = await supabase
           .from("questions")
           .select("kategori_id")
           .eq("tryout_id", tryoutId);
 
-        if (qError) {
-          console.error(`❌ Error fetching questions for ${tryoutId}:`, qError);
-          continue;
-        }
-
         if (!questions || questions.length === 0) {
-          console.warn(`⚠️ No questions found for tryout ${tryoutId}`);
+          console.warn(`⚠️ No questions for tryout ${tryoutId}`);
           continue;
         }
 
         const totalCategories = new Set(
-          questions
-            .map((q) => q.kategori_id)
-            .filter((k) => !!k) as string[]
+          questions.map(q => q.kategori_id).filter(Boolean)
         );
 
-        console.log(`🔍 Tryout ${tryoutId}:`, {
-          total_categories: Array.from(totalCategories),
-          completed_categories: Array.from(completedCategories),
-        });
-
-        const allCompleted = Array.from(totalCategories).every((cat) =>
+        const isComplete = Array.from(totalCategories).every(cat =>
           completedCategories.has(cat)
         );
 
-        if (allCompleted) {
+        console.log(`🔍 Tryout ${tryoutId}:`, {
+          total: Array.from(totalCategories),
+          completed: Array.from(completedCategories),
+          isComplete
+        });
+
+        if (isComplete) {
           fullyCompletedCount++;
-          console.log(`✅ Tryout ${tryoutId} FULLY COMPLETED`);
-        } else {
-          const missing = Array.from(totalCategories).filter(
-            (cat) => !completedCategories.has(cat)
-          );
-          console.log(
-            `⏳ Tryout ${tryoutId} INCOMPLETE, missing categories:`,
-            missing
-          );
         }
       }
 
-      console.log(
-        `✅ Stats loaded in ${Date.now() - startTime}ms, fullyCompletedCount =`,
-        fullyCompletedCount
-      );
+      console.log(`✅ Fully completed tryouts: ${fullyCompletedCount}`);
       setTryoutCount(fullyCompletedCount);
+
     } catch (err: any) {
-      console.error("❌ Error fetching stats:", err);
+      console.error("❌ Error:", err);
       setTryoutCount(0);
     }
   };
