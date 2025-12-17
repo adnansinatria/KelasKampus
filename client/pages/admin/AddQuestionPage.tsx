@@ -232,7 +232,16 @@ export default function AddQuestionPage() {
 
       console.log('✅ All images uploaded successfully');
 
-      // Save to database
+      // ✅ DEBUG: Log questions SEBELUM mapping
+      console.log('🔍 Questions state BEFORE mapping:', questionsWithImages.map((q, i) => ({
+        index: i + 1,
+        question: q.question.substring(0, 30),
+        pembahasan: q.pembahasan?.substring(0, 50) || 'KOSONG',
+        has_pembahasan: !!q.pembahasan,
+        pembahasan_length: q.pembahasan?.length || 0,
+      })));
+
+      // Get existing questions
       const allDBQuestions = await api.adminGetTryoutQuestions(tryoutId!);
       const dbQuestionsData = Array.isArray(allDBQuestions?.data)
         ? allDBQuestions.data
@@ -246,6 +255,7 @@ export default function AddQuestionPage() {
 
       const allQuestionsToInsert: any[] = [];
 
+      // Keep other category questions
       otherCategoryQuestions.forEach((q: any) => {
         allQuestionsToInsert.push({
           tryout_id: tryoutId,
@@ -262,8 +272,9 @@ export default function AddQuestionPage() {
         });
       });
 
+      // Add current category questions
       questionsWithImages.forEach((q, index) => {
-        allQuestionsToInsert.push({
+        const questionData = {
           tryout_id: tryoutId,
           kategori_id: kategoriId,
           urutan: index + 1,
@@ -273,12 +284,40 @@ export default function AddQuestionPage() {
           opsi_c: q.optionC,
           opsi_d: q.optionD,
           jawaban_benar: q.answer,
-          pembahasan: q.pembahasan || null,
+          pembahasan: q.pembahasan || null,  // ✅ Include pembahasan
           image_url: q.image_url || null,
+        };
+        
+        // ✅ DEBUG: Log each question yang akan di-insert
+        console.log(`📝 Question ${index + 1} to insert:`, {
+          soal_text: questionData.soal_text.substring(0, 30),
+          pembahasan: questionData.pembahasan?.substring(0, 50) || 'NULL',
+          has_pembahasan: !!questionData.pembahasan,
+          pembahasan_length: questionData.pembahasan?.length || 0,
         });
+        
+        allQuestionsToInsert.push(questionData);
       });
 
-      await api.adminBulkInsertQuestions(allQuestionsToInsert);
+      // ✅ DEBUG: Log total data yang akan di-insert
+      console.log('📊 TOTAL QUESTIONS TO INSERT:', allQuestionsToInsert.length);
+      
+      const currentCategoryQuestions = allQuestionsToInsert.filter(q => q.kategori_id === kategoriId);
+      console.log('📊 CURRENT CATEGORY QUESTIONS:', currentCategoryQuestions.length);
+      
+      const withPembahasan = currentCategoryQuestions.filter(q => q.pembahasan).length;
+      console.log(`✅ ${withPembahasan} questions have pembahasan out of ${currentCategoryQuestions.length}`);
+      
+      // ✅ DEBUG: Log full first question
+      if (currentCategoryQuestions.length > 0) {
+        console.log('🔍 FULL FIRST QUESTION DATA:', currentCategoryQuestions[0]);
+      }
+
+      // Insert to database
+      console.log('📤 Calling api.adminBulkInsertQuestions...');
+      const insertResult = await api.adminBulkInsertQuestions(allQuestionsToInsert);
+      console.log('✅ Insert result:', insertResult);
+
       setQuestionsForCategory(kategoriId!, questionsWithImages);
 
       toast.success("Semua soal berhasil disimpan!");
