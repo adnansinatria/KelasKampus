@@ -17,6 +17,8 @@ interface CSVRow {
   opsi_c: string;
   opsi_d: string;
   jawaban_benar: string;
+  pembahasan?: string;
+  image_url?: string;
 }
 
 interface PreviewData {
@@ -120,6 +122,8 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
       error: (error) => {
         toast.error(`Error parsing CSV: ${error.message}`);
         setFile(null);
+        setPreviewData(null);
+        setErrors([]);
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
@@ -132,15 +136,57 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
     reader.onload = (e) => {
       try {
         const data = e.target?.result;
-        const workbook = XLSX.read(data, { type: "binary" });
+        const workbook = XLSX.read(data, { type: "binary", cellDates: true });
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
+          defval: "",
+          raw: false
+        });
 
-        validateAndPreview(jsonData as CSVRow[]);
+        const normalizedData = jsonData.map((row: any) => {
+          const normalized: any = {};
+          
+          for (const key in row) {
+            let value = row[key];
+            
+            if (key === 'tanggal_ujian') {
+              if (typeof value === 'number') {
+                const excelDate = XLSX.SSF.parse_date_code(value);
+                const day = String(excelDate.d).padStart(2, '0');
+                const month = String(excelDate.m).padStart(2, '0');
+                const year = excelDate.y;
+                value = `${day}/${month}/${year}`;
+              } else if (value instanceof Date) {
+                const day = String(value.getDate()).padStart(2, '0');
+                const month = String(value.getMonth() + 1).padStart(2, '0');
+                const year = value.getFullYear();
+                value = `${day}/${month}/${year}`;
+              } else if (typeof value === 'string') {
+                const match = value.match(/(\d{2})[\/\-](\d{2})[\/\-](\d{4})/);
+                if (match) {
+                  value = `${match[1]}/${match[2]}/${match[3]}`;
+                } else {
+                  const dateMatch = value.match(/(\d{4})[\/\-](\d{2})[\/\-](\d{2})/);
+                  if (dateMatch) {
+                    value = `${dateMatch[3]}/${dateMatch[2]}/${dateMatch[1]}`;
+                  }
+                }
+              }
+            }
+            
+            normalized[key] = String(value || "");
+          }
+          
+          return normalized;
+        });
+
+        validateAndPreview(normalizedData as CSVRow[]);
       } catch (err: any) {
         toast.error(`Error parsing Excel: ${err.message}`);
         setFile(null);
+        setPreviewData(null);
+        setErrors([]);
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
@@ -172,6 +218,10 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
       validationErrors.push("File tidak berisi data");
       setErrors(validationErrors);
       setPreviewData(null);
+      setFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
       return;
     }
 
@@ -215,6 +265,8 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
       const opsi_c = String(row.opsi_c || "").trim();
       const opsi_d = String(row.opsi_d || "").trim();
       const jawaban_benar = String(row.jawaban_benar || "").toUpperCase();
+      const pembahasan = String(row.pembahasan || "").trim();
+      const image_url = String(row.image_url || "").trim();
 
       if (!kategori_id || !validCategories.includes(kategori_id)) {
         validationErrors.push(
@@ -246,6 +298,12 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
         );
       }
 
+      if (image_url && !image_url.match(/^https?:\/\/.+/i)) {
+        validationErrors.push(
+          `Baris ${rowNum}: URL gambar tidak valid "${image_url}". Harus berupa URL lengkap (http:// atau https://)`
+        );
+      }
+
       if (kategori_id) {
         if (!questionsByCategory[kategori_id]) {
           questionsByCategory[kategori_id] = [];
@@ -258,6 +316,8 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
           opsi_c: opsi_c,
           opsi_d: opsi_d,
           jawaban_benar: jawaban_benar,
+          pembahasan: pembahasan || null,
+          image_url: image_url || null,
         });
       }
     });
@@ -280,6 +340,10 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
       });
     } else {
       setPreviewData(null);
+      setFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   };
 
@@ -331,6 +395,8 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
               opsi_c: q.opsi_c,
               opsi_d: q.opsi_d,
               jawaban_benar: q.jawaban_benar,
+              pembahasan: q.pembahasan,
+              image_url: q.image_url,
             });
           });
         });
@@ -412,6 +478,9 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
                 <p className="text-xs text-blue-700 mb-2">
                   Kolom wajib: <span className="font-mono">nama_tryout, tanggal_ujian, durasi_menit, status, kategori_id, soal_text, opsi_a, opsi_b, opsi_c, opsi_d, jawaban_benar</span>
                 </p>
+                <p className="text-xs text-blue-700 mb-2">
+                  Kolom opsional: <span className="font-mono">pembahasan, image_url</span>
+                </p>
                 <p className="text-xs text-blue-700 mb-1">
                   <strong>Format tanggal:</strong> DD/MM/YYYY (contoh: 25/12/2025)
                 </p>
@@ -420,6 +489,9 @@ export default function ImportTryoutCSV({ isOpen, onClose, onImportSuccess }: Im
                 </p>
                 <p className="text-xs text-blue-700 mb-1">
                   <strong>Status:</strong> active atau inactive
+                </p>
+                <p className="text-xs text-blue-700 mb-1">
+                  <strong>Image URL:</strong> URL lengkap gambar soal (contoh: https://example.com/image.jpg)
                 </p>
                 <p className="text-xs text-blue-700">
                   <strong>Kategori valid:</strong> kpu, ppu, kmbm, pk, lit-id, lit-en, pm
