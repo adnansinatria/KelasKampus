@@ -451,11 +451,32 @@ export const api = {
     return apiCall(`/admin/tryouts/${tryoutId}`, {}, 10000);
   },
 
+  // ✅ UPDATED: Get questions WITH pembahasan debug
   adminGetTryoutQuestions: async (tryoutId: string) => {
     const endpoint = `/admin/tryouts/${tryoutId}/questions`;
     console.log("🔄 Fetching questions from:", endpoint);
     
-    return apiCall(endpoint, {}, 10000);
+    const result = await apiCall(endpoint, {}, 10000);
+    
+    // ✅ DEBUG: Check pembahasan in response
+    if (result?.data && Array.isArray(result.data)) {
+      const withPembahasan = result.data.filter((q: any) => q.pembahasan).length;
+      console.log(`📚 Loaded ${result.data.length} questions, ${withPembahasan} with pembahasan`);
+      
+      // ✅ DEBUG: Log first question details
+      if (result.data.length > 0) {
+        const firstQ = result.data[0];
+        console.log('📝 First question sample:', {
+          id: firstQ.id,
+          soal: firstQ.soal_text?.substring(0, 30),
+          has_pembahasan: !!firstQ.pembahasan,
+          pembahasan_preview: firstQ.pembahasan?.substring(0, 50) || 'TIDAK ADA',
+          all_fields: Object.keys(firstQ),
+        });
+      }
+    }
+    
+    return result;
   },
 
   adminCreateTryout: async (body: {
@@ -484,11 +505,35 @@ export const api = {
     }, 10000);
   },
 
+  // ✅ UPDATED: Bulk insert WITH pembahasan debug
   adminBulkInsertQuestions: async (questions: any[]) => {
-    return apiCall('/questions', {
+    console.log('📤 API: Bulk inserting questions:', questions.length);
+    
+    // ✅ DEBUG: Log sample question BEFORE sending
+    if (questions.length > 0) {
+      const sample = questions[0];
+      console.log('📝 API: Sample question to insert:', {
+        soal_text: sample.soal_text?.substring(0, 50),
+        has_pembahasan: !!sample.pembahasan,
+        pembahasan_length: sample.pembahasan?.length || 0,
+        pembahasan_preview: sample.pembahasan?.substring(0, 50) || 'TIDAK ADA',
+        all_fields: Object.keys(sample),
+      });
+    }
+    
+    // ✅ DEBUG: Count questions with pembahasan
+    const withPembahasan = questions.filter(q => q.pembahasan).length;
+    console.log(`✅ Sending ${withPembahasan} questions with pembahasan out of ${questions.length}`);
+    
+    const result = await apiCall('/questions', {
       method: 'POST',
       body: JSON.stringify({ questions }),
     }, 10000);
+    
+    // ✅ DEBUG: Log result
+    console.log('✅ API: Insert successful, count:', result.count || result.data?.length || 0);
+    
+    return result;
   },
 
   adminDeleteQuestions: async (tryoutId: string) => {
