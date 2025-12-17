@@ -161,8 +161,6 @@ export default function Dashboard() {
     }
   };
 
-
-  // ✅ FIXED: Count unique completed tryouts
   const fetchDashboardStats = async (currentUserId: string | null) => {
     try {
       console.log("📊 Fetching dashboard stats...");
@@ -174,39 +172,109 @@ export default function Dashboard() {
         return;
       }
 
-      // ✅ Get all tryout_results for this user
-      const { data: results, error } = await supabase
-        .from('tryout_results')
-        .select('tryout_id')
-        .eq('user_id', currentUserId);
+      const { data: sessions, error } = await supabase
+        .from('tryout_sessions')
+        .select('tryout_id, kategori_id, session_id, status, completed_at')
+        .eq('user_id', currentUserId)
+        .eq('status', 'completed')
+        .order('completed_at', { ascending: false });
+
+      console.log('📊 Completed sessions:', sessions);
 
       if (error) {
-        console.error('❌ Error fetching results:', error);
+        console.error('❌ Error fetching sessions:', error);
         setTryoutCount(0);
         return;
       }
 
-      if (!results || results.length === 0) {
-        console.log('📊 No completed tryouts yet');
+      if (!sessions || sessions.length === 0) {
+        console.log('📊 No completed sessions yet');
         setTryoutCount(0);
         return;
       }
 
-      // ✅ Count UNIQUE tryout_id (any tryout with at least 1 completed subtest)
-      const uniqueTryoutIds = new Set(results.map(r => r.tryout_id));
-      const completedCount = uniqueTryoutIds.size;
+      const tryoutGroups: Record<string, Set<string>> = {};
+      
+      sessions.forEach((session) => {
+        if (!tryoutGroups[session.tryout_id]) {
+          tryoutGroups[session.tryout_id] = new Set();
+        }
+        tryoutGroups[session.tryout_id].add(session.kategori_id);
+      });
+
+      console.log('📊 Grouped by tryout:', 
+        Object.entries(tryoutGroups).map(([id, cats]) => ({
+          tryout_id: id,
+          completed_categories: Array.from(cats),
+          count: cats.size
+        }))
+      );
+
+      let fullyCompletedCount = 0;
+      const tryoutIds = Object.keys(tryoutGroups);
+
+      for (const tryoutId of tryoutIds) {
+        const completedCategories = tryoutGroups[tryoutId];
+
+        const { data: questions, error: qError } = await supabase
+          .from('questions')
+          .select('kategori_id')
+          .eq('tryout_id', tryoutId);
+
+        console.log(`🔍 Tryout ${tryoutId}:`, {
+          questions_count: questions?.length || 0,
+        });
+
+        if (qError) {
+          console.error(`❌ Error fetching questions for ${tryoutId}:`, qError);
+          continue;
+        }
+
+        if (!questions || questions.length === 0) {
+          console.warn(`⚠️ No questions found for tryout ${tryoutId}`);
+          continue;
+        }
+
+        const totalCategories = new Set(questions.map(q => q.kategori_id));
+
+        console.log(`🔍 Tryout ${tryoutId} analysis:`, {
+          total_categories_needed: Array.from(totalCategories),
+          total_count: totalCategories.size,
+          completed_categories: Array.from(completedCategories),
+          completed_count: completedCategories.size,
+        });
+
+        const allCategoriesCompleted = Array.from(totalCategories).every(
+          cat => completedCategories.has(cat)
+        );
+
+        if (allCategoriesCompleted) {
+          fullyCompletedCount++;
+          console.log(`✅ Tryout ${tryoutId} is FULLY COMPLETED!`);
+        } else {
+          const missing = Array.from(totalCategories).filter(cat => !completedCategories.has(cat));
+          console.log(`⏳ Tryout ${tryoutId} is INCOMPLETE. Missing: ${missing.join(', ')}`);
+        }
+      }
 
       console.log(`✅ Stats loaded in ${Date.now() - startTime}ms`);
-      console.log(`📊 User completed ${results.length} subtests from ${completedCount} tryouts`);
+      console.log(`📊 Summary:`);
+      console.log(`   - Total completed sessions: ${sessions.length}`);
+      console.log(`   - Unique tryouts attempted: ${tryoutIds.length}`);
+      console.log(`   - FULLY completed tryouts: ${fullyCompletedCount}`);
 
-      setTryoutCount(completedCount);
+      setTryoutCount(fullyCompletedCount);
 
     } catch (err: any) {
       console.error("❌ Error fetching stats:", err);
+      console.error("❌ Error stack:", err.stack);
       setTryoutCount(0);
+      
+      if (err.message === 'Request timeout') {
+        toast.error('Server lambat. Coba refresh halaman.');
+      }
     }
   };
-
 
   const fetchRecentActivities = async () => {
     try {
@@ -288,7 +356,6 @@ export default function Dashboard() {
         console.warn('⚠️ User ID not found');
         return;
       }
-
 
       const { data, error } = await supabase
         .from('transactions')
