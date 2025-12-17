@@ -4,16 +4,6 @@ import { ArrowLeft } from "lucide-react";
 import toast from "react-hot-toast";
 import { api } from "@/lib/api";
 import useTryoutStore from "../../stores/tryoutStore";
-import { supabase } from "@/lib/supabase"; // ✅ tambahin ini
-
-// ✅ helper: tanggal hari ini (YYYY-MM-DD)
-const getTodayDate = () => {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
 
 export default function AddNewTryoutPage() {
   const navigate = useNavigate();
@@ -59,53 +49,16 @@ export default function AddNewTryoutPage() {
     });
   };
 
-  // ✅ VALIDASI + save ke API
+  // ✅ CHANGED: Validate minimal 1 soal + save to API
   const handleSaveTryout = async () => {
-    const trimmedName = (tryoutInfo.name || "").trim();
-
-    // 1) wajib isi
-    if (!trimmedName || !tryoutInfo.tanggal) {
+    if (!tryoutInfo.name || !tryoutInfo.tanggal) {
       toast.error("Nama Tryout dan Tanggal Ujian wajib diisi.");
       return;
     }
 
-    // 2) tanggal tidak boleh mundur
-    const selectedDate = new Date(tryoutInfo.tanggal);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    if (selectedDate < today) {
-      toast.error("Tanggal ujian tidak boleh sebelum hari ini.");
-      return;
-    }
-
-    // 3) minimal 1 kategori soal
+    // ✅ ADDED BACK: Question validation
     if (Object.keys(questionsByCategory).length === 0) {
       toast.error("Minimal harus ada 1 kategori soal yang diisi.");
-      return;
-    }
-
-    // 4) nama unik (case-insensitive)
-    try {
-      const { data: existing, error: checkError } = await supabase
-        .from("tryouts")
-        .select("id, nama_tryout")
-        .ilike("nama_tryout", trimmedName)
-        .limit(1);
-
-      if (checkError) {
-        console.error("Error checking duplicate:", checkError);
-        toast.error("Gagal memeriksa duplikat nama tryout.");
-        return;
-      }
-
-      if (existing && existing.length > 0) {
-        toast.error(`Nama tryout "${trimmedName}" sudah digunakan. Gunakan nama lain.`);
-        return;
-      }
-    } catch (err: any) {
-      console.error("❌ Error checking duplicate:", err);
-      toast.error("Gagal memeriksa duplikat nama tryout.");
       return;
     }
 
@@ -116,7 +69,7 @@ export default function AddNewTryoutPage() {
 
       try {
         const tryoutResponse = await api.adminCreateTryout({
-          nama_tryout: trimmedName,
+          nama_tryout: tryoutInfo.name,
           tanggal_ujian: tryoutInfo.tanggal,
           kategori: "umum",
           durasi_menit: 180,
@@ -167,10 +120,7 @@ export default function AddNewTryoutPage() {
   };
 
   const getTotalQuestions = () => {
-    return Object.values(questionsByCategory).reduce(
-      (sum, questions) => sum + questions.length,
-      0
-    );
+    return Object.values(questionsByCategory).reduce((sum, questions) => sum + questions.length, 0);
   };
 
   return (
@@ -221,7 +171,6 @@ export default function AddNewTryoutPage() {
                 onChange={handleInputChange}
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#295782]"
                 disabled={isSaving}
-                min={getTodayDate()} // ✅ batas minimal hari ini
               />
             </div>
           </div>
@@ -241,6 +190,7 @@ export default function AddNewTryoutPage() {
                       <Link
                         key={sub.id}
                         to={`/admin-tryout/new/${sub.id}/questions/new`} 
+                        // ✅ CHANGED: Use 'new' sebagai placeholder untuk identify add mode
                         className="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                       >
                         <span className="text-sm text-[#1E293B]">{sub.name}</span>
