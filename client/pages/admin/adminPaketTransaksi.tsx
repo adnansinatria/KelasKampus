@@ -138,16 +138,18 @@ export default function AdminPaketTransaksi() {
 
   const fetchTransaksis = async () => {
     try {
+      setIsLoading(true);
+
       const { data, error } = await supabase
         .from("transactions")
         .select(`
           *,
-          users:user_id (
+          user:users (
             nama_lengkap,
             email,
             photo_profile
           ),
-          packages:package_id (
+          package:packages (
             id,
             name,
             price
@@ -155,18 +157,22 @@ export default function AdminPaketTransaksi() {
         `)
         .order("created_at", { ascending: false });
 
-      if (error) throw error;
-
+      if (error) {
+        console.error("Supabase Error Full:", error);
+        throw error;
+      }
       const transformedData = data?.map((t: any) => ({
         id: t.id,
         user_id: t.user_id,
-        user_name: t.users?.nama_lengkap || "Unknown User",
-        user_email: t.users?.email || "-",
-        user_photo: t.users?.photo_profile || null,
+        user_name: t.user?.nama_lengkap || "User Tidak Dikenal",
+        user_email: t.user?.email || "-",
+        user_photo: t.user?.photo_profile || null,
+        
         package_id: t.package_id,
-        package_name: t.packages?.name || "-",
-        package_price: t.packages?.price || t.amount,
-        payment_method: t.payment_method,
+        package_name: t.package?.name || "Paket Tidak Ditemukan",
+        package_price: t.package?.price || t.amount,
+        
+        payment_method: t.payment_method || "Midtrans",
         amount: t.amount,
         status: t.status,
         created_at: t.created_at,
@@ -176,10 +182,16 @@ export default function AdminPaketTransaksi() {
 
       setTransaksis(transformedData);
       calculateStats(transformedData);
-    } catch (err) {
-      console.error("Fetch transactions error:", err);
-      toast.error("Gagal memuat transaksi");
+    } catch (err: any) {
+      console.error("Fetch transactions error detail:", err.message);
+      if (err.message.includes("relationship")) {
+        toast.error("Gagal menghubungkan tabel Transaksi ke User. Cek SQL Editor.");
+      } else {
+        toast.error("Gagal memuat transaksi");
+      }
       setTransaksis([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
