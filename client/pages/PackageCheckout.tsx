@@ -11,7 +11,6 @@ import Header from '@/components/Header';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
 
-// Tipe global untuk Snap Midtrans
 declare global {
   interface Window {
     snap: any;
@@ -104,6 +103,18 @@ export default function PackageCheckout() {
 
     try {
       setIsSubmitting(true);
+
+      console.log('📦 Data Paket:', {
+          id: packageData.id,
+          price: packageData.price,
+          user: currentUser.user_id
+      });
+
+      if (isNaN(Number(packageData.price))) {
+          toast.error("Data harga paket error (NaN). Silakan refresh halaman.");
+          setIsSubmitting(false);
+          return;
+      }
       
       const { data, error } = await supabase.functions.invoke('create-midtrans-transaction', {
         body: {
