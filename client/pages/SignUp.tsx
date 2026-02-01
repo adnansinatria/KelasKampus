@@ -124,38 +124,25 @@ export default function SignUp() {
     }
   };
 
-  // ✅ KEEP: Google OAuth (tetap pakai custom backend)
-  const handleGoogleSuccess = async (codeResponse: any) => {
-      console.log("Respons diterima dari Google OAuth:", codeResponse);
+  const handleGoogleLogin = async () => {
+    try {
       setIsLoading(true);
-      try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/auth`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY!,
-                'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY!}`,
-            },
-            body: JSON.stringify({ code: codeResponse.code, method: "google-login" }),
-        });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json?.message || "Google Signin failed");
-        
-        const token = json?.data?.token;
-        if(token) {
-            localStorage.setItem('auth_token', token);
-            navigate('/dashboard');
-        } else {
-            throw new Error("Login Google berhasil, tetapi token tidak ditemukan.");
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
         }
-      } catch(err: any) {
-        alert(err.message || "Gagal mendaftar dengan Google");
-        setIsLoading(false);
-      }
+      });
+      if (error) throw error;
+    } catch (error: any) {
+      console.error("❌ Google Login Error:", error);
+      alert("Gagal daftar dengan Google: " + error.message);
+      setIsLoading(false);
+    }
   };
 
   const signUpWithGoogle = useGoogleLogin({
-    onSuccess: handleGoogleSuccess,
+    onSuccess: handleGoogleLogin,
     onError: (error) => console.error("Google Login Gagal:", error),
     flow: 'auth-code',
   });

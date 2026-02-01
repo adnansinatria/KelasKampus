@@ -575,19 +575,6 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
-
-      {/* Footer */}
-      <footer className="bg-gradient-to-b from-[#F8FAFC] to-[#F1F5F9]/50 border-t border-[#E2E8F0] px-4 md:px-8 py-4">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-[#45556C]">
-          <p>© 2025 Kelas Kampus. Semua hak cipta dilindungi.</p>
-          <div className="flex items-center gap-4">
-            <button className="hover:text-[#295782]">Bantuan</button>
-            <button className="hover:text-[#295782]">Kebijakan Privasi</button>
-            <button className="hover:text-[#295782]">Syarat Layanan</button>
-            <button className="hover:text-[#295782]">Kontak</button>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

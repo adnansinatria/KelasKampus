@@ -8,56 +8,53 @@ export default function AuthCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        console.log("🔄 Processing callback...");
-
+        console.log("🔄 Memproses callback login...");
         const { data: { session }, error } = await supabase.auth.getSession();
 
         if (error) throw error;
-
-        if (session) {
-          console.log("✅ Session found:", session);
-
-          // Check if user exists
-          const { data: userData, error: userError } = await supabase
-            .from('users')
-            .select('role, user_id')
-            .eq('auth_id', session.user.id)
-            .single();
-
-          if (userError && userError.code === 'PGRST116') {
-            // User not found, create new
-            console.log("📝 Creating new user...");
-
-            const { error: insertError } = await supabase
-              .from('users')
-              .insert({
-                auth_id: session.user.id,
-                email: session.user.email,
-                nama_lengkap: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-                role: 'siswa',
-                photo_profile: session.user.user_metadata?.avatar_url || null
-              });
-
-            if (insertError) throw insertError;
-
-            navigate('/dashboard', { replace: true });
-          } else if (userData) {
-            // User exists
-            const role = userData.role || 'siswa';
-
-            if (role === 'admin') {
-              navigate('/admin', { replace: true });
-            } else {
-              navigate('/dashboard', { replace: true });
-            }
-          }
-        } else {
-          console.log("❌ No session");
+        if (!session) {
           navigate('/signin', { replace: true });
+          return;
         }
-      } catch (error: any) {
-        console.error("❌ Callback error:", error);
-        alert("Login gagal: " + error.message);
+
+        const { user } = session;
+
+        // 1. Cek apakah user sudah ada di tabel public.users
+        const { data: userData, error: userError } = await supabase
+          .from('users')
+          .select('role')
+          .eq('auth_id', user.id)
+          .single();
+
+        // 2. Jika USER BARU (error PGRST116 berarti data tidak ditemukan)
+        if (userError && userError.code === 'PGRST116') {
+          console.log("📝 User baru terdeteksi, mendaftarkan ke database...");
+          
+          const { error: insertError } = await supabase
+            .from('users')
+            .insert({
+              auth_id: user.id,
+              email: user.email,
+              nama_lengkap: user.user_metadata?.full_name || user.user_metadata?.nama_lengkap || user.email?.split('@')[0],
+              role: 'siswa',
+              photo_profile: user.user_metadata?.avatar_url || null
+            });
+
+          if (insertError) {
+            console.error("❌ Gagal mendaftarkan user baru:", insertError);
+            throw insertError;
+          }
+        }
+
+        // 3. Set token manual untuk mendukung logic Dashboard lama
+        localStorage.setItem("auth_token", session.access_token);
+
+        // 4. Redirect berdasarkan role (ambil role terbaru)
+        const role = userData?.role || 'siswa';
+        navigate(role === 'admin' ? '/admin' : '/dashboard', { replace: true });
+
+      } catch (err) {
+        console.error("❌ Callback error:", err);
         navigate('/signin', { replace: true });
       }
     };
@@ -66,10 +63,10 @@ export default function AuthCallback() {
   }, [navigate]);
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-[#E6F3FF] via-[#F0F7FF] to-[#F8FBFF]">
+    <div className="flex items-center justify-center min-h-screen bg-[#EFF6FB]">
       <div className="text-center">
-        <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-[#295782] mx-auto mb-4"></div>
-        <p className="text-[#295782] font-medium">Memproses login...</p>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#295782] mx-auto mb-4"></div>
+        <p className="text-[#295782]">Menyiapkan akun Anda...</p>
       </div>
     </div>
   );
