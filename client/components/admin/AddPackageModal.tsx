@@ -43,13 +43,12 @@ export default function AddPackageModal({ isOpen, onClose, onSuccess }: AddPacka
     setIsSaving(true);
 
     const savePromise = (async () => {
-      // ✅ PENTING: Simpan benefits sebagai STRING biasa, bukan array
       const { error } = await supabase.from("packages").insert({
         name: formData.name.trim(),
         price: parseInt(formData.price),
         duration: parseInt(formData.duration),
         tryout_count: parseInt(formData.tryout_count) || 0,
-        benefits: formData.benefits.trim(), // ✅ String langsung, bukan di-parse
+        benefits: formData.benefits.trim(), 
       });
 
       if (error) throw error;

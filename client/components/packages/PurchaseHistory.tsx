@@ -9,6 +9,7 @@ import { FileText, Package, Calendar, CreditCard, ArrowLeft } from 'lucide-react
 import { supabase } from '@/lib/supabase';
 import Header from '@/components/Header';
 import toast from 'react-hot-toast';
+import { Button } from '../ui/button';
 
 interface Transaction {
   id: string;
@@ -114,11 +115,7 @@ export default function PurchaseHistory() {
         .from('transactions')
         .select(`
           *,
-          packages:package_id (
-            id,
-            name,
-            price
-          )
+          packages:package_id ( id, name, price )
         `)
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
@@ -128,9 +125,6 @@ export default function PurchaseHistory() {
         throw error;
       }
 
-      console.log('✅ Raw transactions:', data);
-
-      // ✅ Transform data (sama seperti admin)
       const transformedData = (data || []).map((t: any) => ({
         id: t.id,
         package_id: t.package_id,
@@ -138,7 +132,8 @@ export default function PurchaseHistory() {
         amount: t.amount,
         payment_method: t.payment_method,
         status: t.status,
-        created_at: t.created_at
+        created_at: t.created_at,
+        snap_token: t.snap_token
       }));
 
       console.log('✅ Processed transactions:', transformedData);
@@ -277,6 +272,18 @@ export default function PurchaseHistory() {
                         {formatPrice(transaction.amount)}
                       </p>
                     </div>
+
+                    {/* ✅ TOMBOL BAYAR (Hanya jika Pending) */}
+                    {transaction.status === 'pending' && (
+                        <Button 
+                            onClick={() => navigate('/packages/payment-instruction', {
+                                state: { transaction: transaction }
+                            })}
+                            className="bg-[#295782] text-white hover:bg-[#1e4060]"
+                        >
+                            Bayar
+                        </Button>
+                    )}
                   </div>
                 </div>
               </Card>

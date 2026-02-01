@@ -1,5 +1,3 @@
-// src/components/admin/AddAdminModal.tsx (FINAL - CHAOS SCHEMA FIX)
-
 import { useState } from "react";
 import { X, Eye, EyeOff, CheckCircle, XCircle } from "lucide-react";
 import toast from "react-hot-toast";
@@ -75,7 +73,6 @@ export default function AddAdminModal({ isOpen, onClose, onSuccess }: AddAdminMo
     setIsSaving(true);
 
     const savePromise = (async () => {
-      // 1. Create auth user with metadata
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: formData.email.trim(),
         password: formData.password,
@@ -92,10 +89,8 @@ export default function AddAdminModal({ isOpen, onClose, onSuccess }: AddAdminMo
 
       console.log("✅ Auth user created:", authData.user.id);
 
-      // 2. Wait for database trigger to complete
       await new Promise(resolve => setTimeout(resolve, 4000));
 
-      // 3. Check if user already exists in custom users table
       const { data: existingUser } = await supabase
         .from("users")
         .select("email, role, user_id, auth_id")
@@ -104,21 +99,17 @@ export default function AddAdminModal({ isOpen, onClose, onSuccess }: AddAdminMo
 
       console.log("🔍 Existing user check:", existingUser);
 
-      // 4. If user doesn't exist, insert manually
       if (!existingUser) {
         console.log("⚠️ User not found, inserting manually...");
 
-        // ✅ IMPORTANT: Jangan kirim id (biar auto-increment), hanya kirim data minimal
         const { error: insertError } = await supabase
           .from("users")
           .insert({
             email: formData.email.trim(),
             nama_lengkap: formData.nama_lengkap.trim(),
             role: "admin",
-            auth_id: authData.user.id, // Link to auth.users
+            auth_id: authData.user.id,
             status_akun: "aktif",
-            // id akan auto-increment (integer)
-            // user_id akan auto-generate via gen_random_uuid()
           });
 
         if (insertError) {
@@ -128,7 +119,6 @@ export default function AddAdminModal({ isOpen, onClose, onSuccess }: AddAdminMo
 
         console.log("✅ User successfully inserted");
       } 
-      // 5. If user exists but not admin, update role
       else if (existingUser.role !== "admin") {
         console.log("⚠️ User exists but not admin, updating role...");
 
@@ -137,7 +127,7 @@ export default function AddAdminModal({ isOpen, onClose, onSuccess }: AddAdminMo
           .update({ 
             role: "admin", 
             nama_lengkap: formData.nama_lengkap.trim(),
-            auth_id: authData.user.id, // Update auth_id link
+            auth_id: authData.user.id,
           })
           .eq("email", formData.email.trim());
 
@@ -151,7 +141,6 @@ export default function AddAdminModal({ isOpen, onClose, onSuccess }: AddAdminMo
         console.log("✅ User already exists as admin");
       }
 
-      // Reset form
       setFormData({
         email: "",
         password: "",

@@ -4,18 +4,12 @@ import {
   Edit2, 
   Trash2, 
   Plus, 
-  Upload, 
   FileText, 
   TrendingUp, 
   Trophy, 
   ShoppingCart,
   Package,
-  Eye,
-  Check,
-  X,
-  Clock,
-  Image as ImageIcon,
-  ZoomIn
+  Clock
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
@@ -23,7 +17,6 @@ import { useSearchParams } from "react-router-dom";
 import AdminLayout from "@/components/admin/AdminLayout";
 import AddPackageModal from "@/components/admin/AddPackageModal";
 import EditPackageModal from "@/components/admin/EditPackageModal";
-import { sendPaymentConfirmationEmail } from "@/lib/emailService";
 
 interface Paket {
   id: string;
@@ -47,9 +40,9 @@ interface Transaksi {
   payment_method: string;
   amount: number;
   status: 'success' | 'failed' | 'pending';
-  payment_proof?: string | null;
   created_at: string;
   updated_at?: string;
+  snap_token?: string;
 }
 
 export default function AdminPaketTransaksi() {
@@ -71,10 +64,6 @@ export default function AdminPaketTransaksi() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedPackage_Id, setSelectedPackage_Id] = useState<string | null>(null);
-  const [showProofModal, setShowProofModal] = useState(false);
-  const [selectedProof, setSelectedProof] = useState<string | null>(null);
-  const [selectedTransaction, setSelectedTransaction] = useState<Transaksi | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
 
   // Load data on mount + when tab changes
   useEffect(() => {
@@ -180,9 +169,9 @@ export default function AdminPaketTransaksi() {
         payment_method: t.payment_method,
         amount: t.amount,
         status: t.status,
-        payment_proof: t.payment_proof,
         created_at: t.created_at,
         updated_at: t.updated_at,
+        snap_token: t.snap_token
       })) || [];
 
       setTransaksis(transformedData);
@@ -253,10 +242,10 @@ export default function AdminPaketTransaksi() {
     });
   };
 
-  // ✅ NEW: Function untuk hapus transaksi pending
+  // ✅ UPDATED: Hanya hapus data database (tidak ada storage image)
   const handleDeleteTransaction = async (transaction: Transaksi) => {
-    if (transaction.status !== 'pending') {
-      toast.error('Hanya transaksi pending yang bisa dihapus');
+    if (transaction.status !== 'pending' && transaction.status !== 'failed') {
+      toast.error('Hanya transaksi pending/failed yang bisa dihapus');
       return;
     }
 
@@ -265,36 +254,13 @@ export default function AdminPaketTransaksi() {
     }
 
     const deletePromise = (async () => {
-      // 1. Hapus file bukti pembayaran dari storage (jika ada)
-      if (transaction.payment_proof) {
-        try {
-          const urlParts = transaction.payment_proof.split('/');
-          const fileName = urlParts[urlParts.length - 1];
-          
-          const { error: storageError } = await supabase.storage
-            .from('payment-proofs')
-            .remove([fileName]);
-
-          if (storageError) {
-            console.warn('Storage delete warning:', storageError);
-          }
-        } catch (err) {
-          console.warn('Failed to delete proof file:', err);
-        }
-      }
-
-      // 2. Hapus transaksi dari database
+      // Hapus transaksi dari database
       const { error } = await supabase
         .from("transactions")
         .delete()
         .eq("id", transaction.id);
 
       if (error) throw error;
-
-      // 3. Update localStorage
-      const existingTransactions = JSON.parse(localStorage.getItem('package_transactions') || '[]');
-      const updatedTransactions = existingTransactions.filter((t: any) => t.id !== transaction.id);
-      localStorage.setItem('package_transactions', JSON.stringify(updatedTransactions));
 
       await fetchTransaksis();
       return transaction.user_name;
@@ -304,160 +270,6 @@ export default function AdminPaketTransaksi() {
       loading: 'Menghapus transaksi...',
       success: (name) => `Transaksi dari ${name} berhasil dihapus!`,
       error: (err) => `Gagal menghapus: ${err.message}`,
-    });
-  };
-
-  const handleViewProof = (transaction: Transaksi) => {
-    if (!transaction.payment_proof) {
-      toast.error("Bukti pembayaran tidak tersedia");
-      return;
-    }
-    setSelectedTransaction(transaction);
-    setSelectedProof(transaction.payment_proof);
-    setShowProofModal(true);
-  };
-
-  const handleUpdateStatus = async (newStatus: "success" | "failed") => {
-    if (!selectedTransaction) return;
-
-    const statusLabel = newStatus === "success" ? "menerima" : "menolak";
-    if (!confirm(`Apakah Anda yakin ingin ${statusLabel} transaksi dari ${selectedTransaction.user_name}?`)) {
-      return;
-    }
-
-    setIsProcessing(true);
-
-    const updatePromise = async () => {
-      try {
-        console.log("🔍 DEBUG - Transaction:", selectedTransaction);
-
-        // ✅ 1. Update transaction status
-        const { error: updateError } = await supabase
-          .from("transactions")
-          .update({
-            status: newStatus,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", selectedTransaction.id);
-
-        if (updateError) {
-          console.error("❌ Update transaction error:", updateError);
-          throw updateError;
-        }
-
-        console.log("✅ Transaction status updated");
-
-        // ✅ 2. Grant package access (only if approved)
-        if (newStatus === "success") {
-          // Get user_id and package_id (handle both field name formats)
-          const userId = selectedTransaction.user_id || selectedTransaction.user_id;
-          const packageId = selectedTransaction.package_id || selectedTransaction.package_id;
-
-          console.log("📦 Package data:", { userId, packageId });
-
-          if (!userId || !packageId) {
-            console.error("❌ Missing user_id or package_id");
-            throw new Error("Data user atau paket tidak lengkap");
-          }
-
-          // Check if package already exists
-          const { data: existingPackage, error: checkError } = await supabase
-            .from("user_packages")
-            .select("*")
-            .eq("user_id", userId)
-            .eq("package_id", packageId)
-            .maybeSingle();
-
-          if (checkError) {
-            console.error("❌ Check package error:", checkError);
-            throw checkError;
-          }
-
-          if (existingPackage) {
-            // Update existing package
-            console.log("📝 Updating existing package...");
-            const { error: updatePkgError } = await supabase
-              .from("user_packages")
-              .update({
-                is_active: true,
-                valid_until: null, // Lifetime
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", existingPackage.id);
-
-            if (updatePkgError) {
-              console.error("❌ Update package error:", updatePkgError);
-              throw updatePkgError;
-            }
-            console.log("✅ Package updated (lifetime)");
-          } else {
-            // Create new package
-            console.log("➕ Creating new package...");
-            const { error: insertPkgError } = await supabase
-              .from("user_packages")
-              .insert({
-                user_id: userId,
-                package_id: packageId,
-                is_active: true,
-                valid_until: null, // Lifetime
-              });
-
-            if (insertPkgError) {
-              console.error("❌ Insert package error:", insertPkgError);
-              throw insertPkgError;
-            }
-            console.log("✅ Package created (lifetime)");
-
-            try {
-              console.log("📧 Sending email notification...");
-              
-              const { data: emailResult, error: emailError } = await supabase.functions.invoke(
-                'send-payment-email',
-                {
-                  body: {
-                    userEmail: selectedTransaction.user_email,
-                    userName: selectedTransaction.user_name,
-                    packageName: selectedTransaction.package_name,
-                    amount: selectedTransaction.amount,
-                    transactionId: selectedTransaction.id,
-                  }
-                }
-              );
-
-              if (emailError) {
-                console.warn("⚠️ Email error:", emailError);
-              } else {
-                console.log("✅ Email sent successfully:", emailResult);
-              }
-            } catch (emailErr) {
-              console.warn("⚠️ Email service error:", emailErr);
-              // Don't throw - transaction still successful even if email fails
-            }
-          }
-        }
-
-        // ✅ 3. Refresh data
-        await fetchTransaksis();
-        setShowProofModal(false);
-        setSelectedTransaction(null);
-        setSelectedProof(null);
-        
-        return statusLabel;
-      } catch (error) {
-        console.error("❌ Full error:", error);
-        throw error;
-      }
-    };
-
-    toast.promise(updatePromise(), {
-      loading: "Memproses transaksi...",
-      success: (label) => `✅ Transaksi berhasil ${label}!`,
-      error: (err) => {
-        console.error("❌ Toast error:", err);
-        return `❌ Gagal: ${err.message || "Terjadi kesalahan"}`;
-      },
-    }).finally(() => {
-      setIsProcessing(false);
     });
   };
 
@@ -506,9 +318,9 @@ export default function AdminPaketTransaksi() {
       case "success":
         return "Sukses";
       case "failed":
-        return "Ditolak";
+        return "Gagal";
       case "pending":
-        return "Menunggu Verifikasi";
+        return "Belum Bayar";
       default:
         return status;
     }
@@ -533,7 +345,7 @@ export default function AdminPaketTransaksi() {
             Manajemen Paket & Transaksi
           </h1>
           <p className="text-sm text-[#64748B]">
-            Kelola paket langganan dan verifikasi transaksi pengguna.
+            Kelola paket langganan dan pantau transaksi otomatis.
           </p>
         </div>
 
@@ -576,7 +388,7 @@ export default function AdminPaketTransaksi() {
               <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center">
                 <Clock className="w-5 h-5 text-orange-600" />
               </div>
-              <p className="text-sm text-[#64748B]">Pending Verification</p>
+              <p className="text-sm text-[#64748B]">Pending Payment</p>
             </div>
             <p className="text-2xl font-bold text-[#1E293B]">{pendingCount}</p>
           </div>
@@ -603,7 +415,7 @@ export default function AdminPaketTransaksi() {
                   : "text-[#64748B] hover:text-[#1E293B]"
               }`}
             >
-              Kelola Transaksi
+              Riwayat Transaksi
               {pendingCount > 0 && (
                 <span className="absolute top-2 right-2 bg-orange-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
                   {pendingCount}
@@ -758,7 +570,7 @@ export default function AdminPaketTransaksi() {
                         : "bg-gray-100 text-[#64748B] hover:bg-gray-200"
                     }`}
                   >
-                    Ditolak ({transaksis.filter(t => t.status === 'failed').length})
+                    Gagal/Kadaluarsa ({transaksis.filter(t => t.status === 'failed').length})
                   </button>
                 </div>
               </div>
@@ -851,8 +663,8 @@ export default function AdminPaketTransaksi() {
                             </td>
 
                             <td className="px-6 py-4 whitespace-nowrap">
-                              <p className="text-sm text-[#1E293B]">
-                                {transaksi.payment_method}
+                              <p className="text-sm text-[#1E293B] uppercase">
+                                {transaksi.payment_method?.replace("_", " ")}
                               </p>
                             </td>
 
@@ -878,29 +690,8 @@ export default function AdminPaketTransaksi() {
 
                             <td className="px-6 py-4 whitespace-nowrap">
                               <div className="flex items-center gap-2">
-                                {transaksi.payment_proof ? (
-                                  <button
-                                    onClick={() => handleViewProof(transaksi)}
-                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                                      transaksi.status === 'pending'
-                                        ? 'bg-orange-500 text-white hover:bg-orange-600'
-                                        : 'bg-blue-50 text-blue-600 hover:bg-blue-100'
-                                    }`}
-                                    title="Lihat & Verifikasi Bukti"
-                                  >
-                                    <ZoomIn className="w-4 h-4" />
-                                    <span className="text-xs font-medium">
-                                      {transaksi.status === 'pending' ? 'Verifikasi' : 'Lihat Bukti'}
-                                    </span>
-                                  </button>
-                                ) : (
-                                  <span className="text-xs text-gray-400 italic">
-                                    Tidak ada bukti
-                                  </span>
-                                )}
-
-                                {/* ✅ Tombol Hapus untuk Pending */}
-                                {transaksi.status === 'pending' && (
+                                {/* Hanya tampilkan tombol Hapus jika status bukan success (untuk bersih-bersih data) */}
+                                {transaksi.status !== 'success' ? (
                                   <button
                                     onClick={() => handleDeleteTransaction(transaksi)}
                                     className="p-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
@@ -908,6 +699,10 @@ export default function AdminPaketTransaksi() {
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
+                                ) : (
+                                  <span className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded border border-green-100">
+                                    Otomatis
+                                  </span>
                                 )}
                               </div>
                             </td>
@@ -958,125 +753,6 @@ export default function AdminPaketTransaksi() {
             fetchTransaksis();
           }}
         />
-      )}
-
-      {/* Proof Review Modal */}
-      {showProofModal && selectedProof && selectedTransaction && (
-        <div
-          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm"
-          onClick={() => {
-            if (!isProcessing) {
-              setShowProofModal(false);
-              setSelectedTransaction(null);
-              setSelectedProof(null);
-            }
-          }}
-        >
-          <div
-            className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-[#295782] to-[#1e4060]">
-              <div>
-                <h3 className="text-xl font-bold text-white mb-1">Verifikasi Bukti Pembayaran</h3>
-                <p className="text-sm text-white/80">
-                  Review bukti pembayaran sebelum konfirmasi
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  if (!isProcessing) {
-                    setShowProofModal(false);
-                    setSelectedTransaction(null);
-                    setSelectedProof(null);
-                  }
-                }}
-                disabled={isProcessing}
-                className="p-2 hover:bg-white/20 rounded-lg transition-colors disabled:opacity-50"
-              >
-                <X className="w-6 h-6 text-white" />
-              </button>
-            </div>
-
-            <div className="p-6 bg-gray-50 border-b border-gray-200">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div>
-                  <p className="text-xs text-[#64748B] mb-1">Pengguna</p>
-                  <p className="text-sm font-semibold text-[#1E293B]">
-                    {selectedTransaction.user_name}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-[#64748B] mb-1">Paket</p>
-                  <p className="text-sm font-semibold text-[#1E293B]">
-                    {selectedTransaction.package_name}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-[#64748B] mb-1">Nominal</p>
-                  <p className="text-sm font-semibold text-green-600">
-                    {formatPrice(selectedTransaction.amount)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-[#64748B] mb-1">Metode</p>
-                  <p className="text-sm font-semibold text-[#1E293B]">
-                    {selectedTransaction.payment_method}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 bg-gray-100">
-              <div className="flex items-center justify-center min-h-full">
-                <img
-                  src={selectedProof}
-                  alt="Bukti Pembayaran"
-                  className="max-w-full h-auto rounded-lg shadow-lg border-4 border-white"
-                />
-              </div>
-            </div>
-
-            {selectedTransaction.status === 'pending' && (
-              <div className="p-6 border-t border-gray-200 bg-white">
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => handleUpdateStatus('failed')}
-                    disabled={isProcessing}
-                    className="flex-1 flex items-center justify-center gap-3 px-6 py-4 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <X className="w-5 h-5" />
-                    <span className="font-semibold">Tolak Pembayaran</span>
-                  </button>
-                  <button
-                    onClick={() => handleUpdateStatus('success')}
-                    disabled={isProcessing}
-                    className="flex-1 flex items-center justify-center gap-3 px-6 py-4 bg-green-600 text-white rounded-xl hover:bg-green-700 transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Check className="w-5 h-5" />
-                    <span className="font-semibold">Terima Pembayaran</span>
-                  </button>
-                </div>
-                <p className="text-xs text-center text-[#64748B] mt-3">
-                  ⚠️ Pastikan bukti pembayaran valid sebelum konfirmasi
-                </p>
-              </div>
-            )}
-
-            {selectedTransaction.status !== 'pending' && (
-              <div className="p-6 border-t border-gray-200 bg-gray-50">
-                <p className="text-sm text-center text-[#64748B]">
-                  Transaksi ini sudah diproses dengan status:{" "}
-                  <span className={`font-semibold ${
-                    selectedTransaction.status === 'success' ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {getStatusLabel(selectedTransaction.status)}
-                  </span>
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
       )}
     </AdminLayout>
   );
