@@ -54,19 +54,56 @@ export default function Dashboard() {
       console.log("⏱️ [START] Loading dashboard data...");
       const startTime = Date.now();
 
-
+      // 1. Ambil sesi aktif
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       let currentUserId: string | null = null;
 
+      // 2. LOGIKA UNTUK GOOGLE LOGIN / SUPABASE SESSION
+      if (session && !sessionError) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        
+        if (!authUser) {
+          navigate("/signin", { replace: true });
+          return;
+        }
 
-      if (sessionError || !session) {
+        // Cek data di tabel users
+        const { data: userData, error: userError } = await supabase
+          .from("users")
+          .select("user_id, nama_lengkap, photo_profile")
+          .eq("auth_id", authUser.id)
+          .single();
+
+        // JIKA AKUN BARU: Data mungkin belum ada di tabel 'users'
+        // Kita gunakan data dari authUser metadata sebagai fallback agar tidak ter-reject
+        if (userError || !userData) {
+          console.warn("⚠️ User data not in table yet, using session metadata.");
+          
+          // Gunakan ID dari auth sebagai sementara agar fetch stats tidak error
+          currentUserId = authUser.id; 
+          setUserPhoto(authUser.user_metadata?.avatar_url || null);
+
+          let nama = authUser.user_metadata?.full_name || authUser.user_metadata?.nama_lengkap || authUser.email?.split("@")[0] || "Pengguna";
+          const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
+          setUser({ nama, inisial });
+        } else {
+          // JIKA AKUN LAMA: Gunakan data resmi dari tabel users
+          currentUserId = userData.user_id;
+          setUserPhoto(userData.photo_profile || null);
+
+          let nama = userData.nama_lengkap || authUser.user_metadata?.full_name || "Pengguna";
+          const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
+          setUser({ nama, inisial });
+        }
+      } 
+      // 3. LOGIKA UNTUK LOGIN MANUAL (LOCALSTORAGE)
+      else {
         const token = localStorage.getItem("auth_token");
         if (!token) {
           navigate("/signin", { replace: true });
           return;
         }
-
 
         const payload = decodeToken(token);
         if (!payload) {
@@ -75,9 +112,7 @@ export default function Dashboard() {
           return;
         }
 
-
         currentUserId = payload.user_id;
-
 
         const { data: userData, error: userError } = await supabase
           .from("users")
@@ -85,76 +120,30 @@ export default function Dashboard() {
           .eq("user_id", payload.user_id)
           .single();
 
-
         if (userData) {
           setUserPhoto(userData.photo_profile || null);
         }
-          
-        if (userError) {
-          console.error("Error fetching user:", userError);
-        }
-
 
         const nama = userData?.nama_lengkap || payload.nama_lengkap || payload.email?.split("@")[0] || "Pengguna";
         const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
         setUser({ nama, inisial });
-      } else {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        
-        if (!authUser) {
-          navigate("/signin", { replace: true });
-          return;
-        }
-
-
-        const { data: userData, error: userError } = await supabase
-          .from("users")
-          .select("user_id, nama_lengkap, photo_profile")
-          .eq("auth_id", authUser.id)
-          .single();
-
-
-        if (userError || !userData) {
-          console.error("Error fetching user:", userError);
-          navigate("/signin", { replace: true });
-          return;
-        }
-
-
-        currentUserId = userData.user_id;
-        setUserPhoto(userData.photo_profile || null);
-
-
-        let nama = userData.nama_lengkap || authUser.user_metadata?.nama_lengkap || authUser.user_metadata?.full_name;
-
-
-        if (!nama) {
-          nama = authUser.email?.split("@")[0] || "Pengguna";
-        }
-
-
-        const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
-        setUser({ nama, inisial });
       }
-
 
       setUserId(currentUserId);
 
-
-      // Load stats, activities, and transactions
+      // 4. Load data pendukung (Stats, Activity, Transactions)
+      // Gunakan currentUserId yang sudah didapat
       await Promise.all([
-        fetchDashboardStats(currentUserId), // ✅ PASS userId
+        fetchDashboardStats(currentUserId),
         fetchRecentActivities(),
         loadRecentTransactions(currentUserId),
       ]);
 
-
       console.log(`⏱️ [END] Dashboard loaded in ${Date.now() - startTime}ms`);
-
 
     } catch (err) {
       console.error("Gagal mengambil data dashboard:", err);
-      localStorage.removeItem("auth_token");
+      // Jangan langsung hapus token jika hanya error jaringan
       navigate("/signin", { replace: true });
     } finally {
       setIsLoading(false);
