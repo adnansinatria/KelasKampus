@@ -40,61 +40,72 @@ export default function TryoutStart() {
     }
   }, []);
 
-  const handleStartTryout = async (kategoriKode?: string) => {
-    console.log('╔════════════════════════════════════╗');
-    console.log('║   START TRYOUT - DEBUG INFO       ║');
-    console.log('╚════════════════════════════════════╝');
-    console.log('📋 kategoriKode received:', kategoriKode);
+  // Di dalam components/pages/TryoutStart.tsx
 
+  const handleStartTryout = async (kategoriKode?: string) => {
     if (!targetInfo) {
       toast.error('Pilih kampus dan jurusan terlebih dahulu!');
       setShowTargetModal(true);
       return;
     }
 
-    if (kategoriKode && progressData[kategoriKode]?.status === 'completed') {
-      toast.error('Subtest ini sudah selesai. Anda tidak dapat mengerjakannya lagi.');
-      return;
-    }
-
     try {
       setIsStarting(true);
-
-      console.log('👤 Target Info:', targetInfo);
-      console.log('✅ kategoriKode to use:', kategoriKode || 'NULL (all categories)');
-
-      console.log('🚀 Calling API to create session...');
       
-      const sessionResponse = await api.createSession({
-        tryout_id: tryoutId!,
-        kategori_id: kategoriKode,
-        target_kampus: targetInfo.kampusName,
-        target_jurusan: targetInfo.prodiName,
-      });
+      // 1. Cek apakah sudah ada session aktif (hasil beli token tadi)
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      // Cari session terakhir yang statusnya in_progress/purchased
+      const { data: existingSession, error: sessionError } = await supabase
+        .from('tryout_sessions')
+        .select('id')
+        .eq('tryout_id', tryoutId)
+        .eq('user_id', currentUser?.user_id) // Pastikan currentUser sudah ada user_id
+        .in('status', ['in_progress', 'purchased']) 
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
 
-      console.log('✅ Session API Response:', sessionResponse);
+      let sessionId = existingSession?.id;
 
-      if (!sessionResponse?.session_id) {
-        throw new Error('Failed to create session - no session_id returned');
+      // 2. Jika Session ada (Skenario Normal Beli Pakai Token) -> UPDATE TARGETNYA
+      if (sessionId) {
+        console.log('✅ Menggunakan session yang sudah dibeli:', sessionId);
+        
+        // Update target kampus & jurusan ke session tersebut
+        const { error: updateError } = await supabase
+            .from('tryout_sessions')
+            .update({
+                target_kampus: targetInfo.kampusName,
+                target_jurusan: targetInfo.prodiName,
+                status: 'in_progress' 
+            })
+            .eq('id', sessionId);
+            
+        if (updateError) throw updateError;
+        
+      } else {
+        console.log('⚠️ Session belum ada, membuat baru...');
+        const sessionResponse = await api.createSession({
+            tryout_id: tryoutId!,
+            kategori_id: kategoriKode,
+            target_kampus: targetInfo.kampusName,
+            target_jurusan: targetInfo.prodiName,
+        });
+        sessionId = sessionResponse?.session_id;
       }
 
-      const sessionId = sessionResponse.session_id;
-      console.log('✅ Session ID from API:', sessionId);
+      if (!sessionId) throw new Error('Gagal mendapatkan Session ID');
 
-      // Navigate to exam page
+      // 4. Navigasi ke Ujian
       const params = new URLSearchParams();
       params.set('session', sessionId);
       if (kategoriKode) params.set('kategori', kategoriKode);
 
-      console.log('🚀 Navigating to exam with params:', params.toString());
-      console.log('╔════════════════════════════════════╗');
-      console.log('║   END START TRYOUT - DEBUG        ║');
-      console.log('╚════════════════════════════════════╝\n');
-
       navigate(`/tryout/${tryoutId}/exam?${params.toString()}`);
 
     } catch (err: any) {
-      console.error('❌ Error in handleStartTryout:', err);
+      console.error('❌ Error starting tryout:', err);
       toast.error(err.message || 'Gagal memulai tryout');
     } finally {
       setIsStarting(false);

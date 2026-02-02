@@ -1,5 +1,3 @@
-// client/pages/Dashboard.tsx
-
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FileText, CheckCircle, Clock, ArrowRight, ShoppingCart } from "lucide-react";
@@ -9,10 +7,12 @@ import { api } from "@/lib/api";
 import { toast } from "react-hot-toast";
 import Header from "@/components/Header";
 
+
 interface UserProfile {
   nama: string;
   inisial: string;
 }
+
 
 interface Transaction {
   id: string;
@@ -22,6 +22,7 @@ interface Transaction {
   created_at: string;
 }
 
+
 const decodeToken = (jwt: string) => {
   try { 
     return JSON.parse(atob(jwt.split('.')[1])); 
@@ -29,6 +30,7 @@ const decodeToken = (jwt: string) => {
     return null; 
   }
 };
+
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -40,9 +42,11 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
 
+
   useEffect(() => {
     loadDashboardData();
   }, [navigate]);
+
 
   const loadDashboardData = async () => {
     try {
@@ -50,11 +54,51 @@ export default function Dashboard() {
       console.log("⏱️ [START] Loading dashboard data...");
       const startTime = Date.now();
 
+      // 1. Ambil sesi aktif
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       let currentUserId: string | null = null;
 
-      if (sessionError || !session) {
+      // 2. LOGIKA UNTUK GOOGLE LOGIN / SUPABASE SESSION
+      if (session && !sessionError) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        
+        if (!authUser) {
+          navigate("/signin", { replace: true });
+          return;
+        }
+
+        // Cek data di tabel users
+        const { data: userData, error: userError } = await supabase
+          .from("users")
+          .select("user_id, nama_lengkap, photo_profile")
+          .eq("auth_id", authUser.id)
+          .single();
+
+        // JIKA AKUN BARU: Data mungkin belum ada di tabel 'users'
+        // Kita gunakan data dari authUser metadata sebagai fallback agar tidak ter-reject
+        if (userError || !userData) {
+          console.warn("⚠️ User data not in table yet, using session metadata.");
+          
+          // Gunakan ID dari auth sebagai sementara agar fetch stats tidak error
+          currentUserId = authUser.id; 
+          setUserPhoto(authUser.user_metadata?.avatar_url || null);
+
+          let nama = authUser.user_metadata?.full_name || authUser.user_metadata?.nama_lengkap || authUser.email?.split("@")[0] || "Pengguna";
+          const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
+          setUser({ nama, inisial });
+        } else {
+          // JIKA AKUN LAMA: Gunakan data resmi dari tabel users
+          currentUserId = userData.user_id;
+          setUserPhoto(userData.photo_profile || null);
+
+          let nama = userData.nama_lengkap || authUser.user_metadata?.full_name || "Pengguna";
+          const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
+          setUser({ nama, inisial });
+        }
+      } 
+      // 3. LOGIKA UNTUK LOGIN MANUAL (LOCALSTORAGE)
+      else {
         const token = localStorage.getItem("auth_token");
         if (!token) {
           navigate("/signin", { replace: true });
@@ -79,53 +123,19 @@ export default function Dashboard() {
         if (userData) {
           setUserPhoto(userData.photo_profile || null);
         }
-          
-        if (userError) {
-          console.error("Error fetching user:", userError);
-        }
 
         const nama = userData?.nama_lengkap || payload.nama_lengkap || payload.email?.split("@")[0] || "Pengguna";
-        const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
-        setUser({ nama, inisial });
-      } else {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        
-        if (!authUser) {
-          navigate("/signin", { replace: true });
-          return;
-        }
-
-        const { data: userData, error: userError } = await supabase
-          .from("users")
-          .select("user_id, nama_lengkap, photo_profile")
-          .eq("auth_id", authUser.id)
-          .single();
-
-        if (userError || !userData) {
-          console.error("Error fetching user:", userError);
-          navigate("/signin", { replace: true });
-          return;
-        }
-
-        currentUserId = userData.user_id;
-        setUserPhoto(userData.photo_profile || null);
-
-        let nama = userData.nama_lengkap || authUser.user_metadata?.nama_lengkap || authUser.user_metadata?.full_name;
-
-        if (!nama) {
-          nama = authUser.email?.split("@")[0] || "Pengguna";
-        }
-
         const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
         setUser({ nama, inisial });
       }
 
       setUserId(currentUserId);
 
-      // Load stats, activities, and transactions
+      // 4. Load data pendukung (Stats, Activity, Transactions)
+      // Gunakan currentUserId yang sudah didapat
       await Promise.all([
         fetchDashboardStats(currentUserId),
-        fetchRecentActivities(currentUserId), // ✅ Pass currentUserId agar query akurat
+        fetchRecentActivities(),
         loadRecentTransactions(currentUserId),
       ]);
 
@@ -133,7 +143,7 @@ export default function Dashboard() {
 
     } catch (err) {
       console.error("Gagal mengambil data dashboard:", err);
-      localStorage.removeItem("auth_token");
+      // Jangan langsung hapus token jika hanya error jaringan
       navigate("/signin", { replace: true });
     } finally {
       setIsLoading(false);
@@ -143,12 +153,15 @@ export default function Dashboard() {
   const fetchDashboardStats = async (currentUserId: string | null) => {
     try {
       console.log("📊 Fetching dashboard stats...");
+      const startTime = Date.now();
 
       if (!currentUserId) {
+        console.warn("⚠️ User ID not found for stats");
         setTryoutCount(0);
         return;
       }
 
+      // ✅ FIXED: Only filter by status (no completed_at check)
       const { data: sessions, error } = await supabase
         .from("tryout_sessions")
         .select("tryout_id, kategori_id, status")
@@ -162,9 +175,12 @@ export default function Dashboard() {
       }
 
       if (!sessions || sessions.length === 0) {
+        console.log("📊 No completed sessions yet");
         setTryoutCount(0);
         return;
       }
+
+      console.log("📊 Completed sessions:", sessions);
 
       // Group by tryout_id
       const tryoutGroups: Record<string, Set<string>> = {};
@@ -178,6 +194,9 @@ export default function Dashboard() {
         }
       }
 
+      console.log("📊 Grouped by tryout:", tryoutGroups);
+
+      // Check completion for each tryout
       let fullyCompletedCount = 0;
       const tryoutIds = Object.keys(tryoutGroups);
 
@@ -189,7 +208,10 @@ export default function Dashboard() {
           .select("kategori_id")
           .eq("tryout_id", tryoutId);
 
-        if (!questions || questions.length === 0) continue;
+        if (!questions || questions.length === 0) {
+          console.warn(`⚠️ No questions for tryout ${tryoutId}`);
+          continue;
+        }
 
         const totalCategories = new Set(
           questions.map(q => q.kategori_id).filter(Boolean)
@@ -199,11 +221,18 @@ export default function Dashboard() {
           completedCategories.has(cat)
         );
 
+        console.log(`🔍 Tryout ${tryoutId}:`, {
+          total: Array.from(totalCategories),
+          completed: Array.from(completedCategories),
+          isComplete
+        });
+
         if (isComplete) {
           fullyCompletedCount++;
         }
       }
 
+      console.log(`✅ Fully completed tryouts: ${fullyCompletedCount}`);
       setTryoutCount(fullyCompletedCount);
 
     } catch (err: any) {
@@ -212,64 +241,38 @@ export default function Dashboard() {
     }
   };
 
-  // ✅ UPDATED: Fetch langsung dari Supabase untuk support IRT (irt_theta)
-  const fetchRecentActivities = async (currentUserId: string | null) => {
+  const fetchRecentActivities = async () => {
     try {
-      console.log("📋 Fetching recent activities via Supabase Query...");
+      console.log("📋 Fetching recent activities via API...");
       const startTime = Date.now();
 
-      if (!currentUserId) return;
 
-      // Query langsung ke tabel tryout_sessions untuk mendapatkan irt_theta
-      const { data, error } = await supabase
-        .from("tryout_sessions")
-        .select(`
-          id, tryout_id, kategori_id, status, 
-          score, irt_theta, raw_score, total_questions, percentage_score,
-          started_at, completed_at, updated_at,
-          tryout:tryouts (nama_tryout)
-        `)
-        .eq("user_id", currentUserId)
-        .order("updated_at", { ascending: false })
-        .limit(5);
+      const response = await api.getRecentActivities();
+      const data = response?.data || response;
 
-      if (error) {
-        console.error("❌ Error fetching activities:", error);
-        return;
-      }
 
       if (Array.isArray(data)) {
         const mapped = data.map((session: any) => {
-          const tryoutName = session.tryout?.nama_tryout || "Tryout";
+          const tryoutName = session.tryout_name || "Tryout";
           const kategoriName = session.kategori_id ? ` - ${getKategoriName(session.kategori_id)}` : "";
           const title = `${tryoutName}${kategoriName}`;
           
-          const date = humanizeDate(session.updated_at || session.completed_at || session.started_at);
+          const date = humanizeDate(session.started_at || session.completed_at);
           const status = session.status === 'completed' ? "Selesai" : "Berlangsung";
           
           let score = "";
-          
-          // ✅ LOGIKA SKOR IRT
-          if (session.status === 'completed') {
-            // Prioritaskan menampilkan Theta jika ada
-            if (session.irt_theta !== null && session.irt_theta !== undefined) {
-              score = `Theta: ${Number(session.irt_theta).toFixed(2)}`;
-            } 
-            // Fallback ke percentage_score dari backend
-            else if (session.percentage_score !== null) {
-              score = `Skor: ${Math.round(session.percentage_score)}`;
-            } 
-            // Fallback terakhir ke score manual
-            else if (session.score !== null) {
-              score = `Skor: ${session.score}`;
-            }
+          if (session.status === 'completed' && session.score !== null) {
+            score = `Skor: ${session.score}`;
           } else {
-            // Logika Progress untuk yang belum selesai
-            const rawScore = session.raw_score || 0; // Kadang raw_score dipakai sbg answered count sementara di logic lama
-            // Kita hitung progress kasar jika data tersedia, atau default kosong
-            // Note: Field answered_count mungkin tidak ada di query ini, jadi kita skip detail progress bar jika tidak ada
-            score = "Lanjutkan";
+            const answeredCount = session.answered_count || 0;
+            const totalQuestions = session.total_questions || 0;
+            
+            if (totalQuestions > 0) {
+              const progress = Math.round((answeredCount / totalQuestions) * 100);
+              score = `Progress: ${progress}%`;
+            }
           }
+
 
           const iconBg = status === "Selesai" 
             ? "linear-gradient(135deg, rgba(0, 0, 0, 0.00) 0%, #A4F4CF 100%)" 
@@ -282,9 +285,9 @@ export default function Dashboard() {
           const action = status === "Selesai" ? "Review Hasil" : "Lanjutkan";
           
           return {
-            id: session.id, // session.id dari query DB
+            id: session.session_id,
             tryoutId: session.tryout_id,
-            sessionId: session.id,
+            sessionId: session.session_id,
             kategoriId: session.kategori_id,
             title,
             date,
@@ -300,7 +303,7 @@ export default function Dashboard() {
         });
         
         setActivities(mapped);
-        console.log(`✅ Activities loaded in ${Date.now() - startTime}ms`);
+        console.log(`✅ Activities loaded in ${Date.now() - startTime}ms:`, mapped);
       }
     } catch (err) {
       console.error("❌ Error fetching activities:", err);
@@ -308,14 +311,17 @@ export default function Dashboard() {
     }
   };
 
+
   const loadRecentTransactions = async (currentUserId: string | null) => {
     try {
       console.log('🔍 Fetching recent transactions...');
+
 
       if (!currentUserId) {
         console.warn('⚠️ User ID not found');
         return;
       }
+
 
       const { data, error } = await supabase
         .from('transactions')
@@ -330,10 +336,12 @@ export default function Dashboard() {
         .order('created_at', { ascending: false })
         .limit(3);
 
+
       if (error) {
         console.error('❌ Transactions error:', error);
         return;
       }
+
 
       const transformed = (data || []).map((t: any) => ({
         id: t.id,
@@ -343,13 +351,16 @@ export default function Dashboard() {
         created_at: t.created_at
       }));
 
+
       console.log('✅ Recent transactions loaded:', transformed);
       setRecentTransactions(transformed);
+
 
     } catch (error) {
       console.error('❌ Error loading transactions:', error);
     }
   };
+
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -359,6 +370,7 @@ export default function Dashboard() {
     }).format(price);
   };
 
+
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('id-ID', {
       day: 'numeric',
@@ -366,6 +378,7 @@ export default function Dashboard() {
       year: 'numeric'
     });
   };
+
 
   const getKategoriName = (kategoriId: string): string => {
     const kategoriMap: Record<string, string> = {
@@ -380,6 +393,7 @@ export default function Dashboard() {
     return kategoriMap[kategoriId] || kategoriId;
   };
 
+
   function humanizeDate(dateStr: string) {
     try {
       const d = new Date(dateStr);
@@ -393,9 +407,10 @@ export default function Dashboard() {
     }
   }
 
+
   const handleActivityClick = (activity: any) => {
     if (activity.status === "Selesai") {
-      navigate(`/tryout/${activity.tryoutId}/result?session=${activity.sessionId}`);
+      navigate(`/tryout/${activity.tryoutId}/start`);
     } else {
       const params = new URLSearchParams();
       params.set('session', activity.sessionId);
@@ -403,6 +418,7 @@ export default function Dashboard() {
       navigate(`/tryout/${activity.tryoutId}/exam?${params.toString()}`);
     }
   };
+
 
   if (!user || isLoading) {
     return (
@@ -415,6 +431,7 @@ export default function Dashboard() {
     );
   }
 
+
   return (
     <div className="min-h-screen bg-white flex flex-col">
       <Header 
@@ -423,6 +440,7 @@ export default function Dashboard() {
         activeMenu="dashboard"
         variant="default"
       />
+
 
       <main className="flex-1 bg-[#EFF6FB] px-4 md:px-8 py-4 md:py-6 space-y-4">
         {/* Hero Banner */}
@@ -448,6 +466,7 @@ export default function Dashboard() {
           />
         </div>
 
+
         {/* Stats Card */}
         <div className="flex justify-center">
           <div className="relative w-full max-w-[520px] h-[90px] md:h-[100px] rounded-xl bg-gradient-to-b from-[#16A34A] to-[#15803D] shadow-md p-4 overflow-hidden">
@@ -463,6 +482,7 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
 
         {/* Activity & Tryout Info */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
@@ -544,19 +564,6 @@ export default function Dashboard() {
           </div>
         </div>
       </main>
-
-      {/* Footer */}
-      <footer className="bg-gradient-to-b from-[#F8FAFC] to-[#F1F5F9]/50 border-t border-[#E2E8F0] px-4 md:px-8 py-4">
-        <div className="flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-[#45556C]">
-          <p>© 2025 Kelas Kampus. Semua hak cipta dilindungi.</p>
-          <div className="flex items-center gap-4">
-            <button className="hover:text-[#295782]">Bantuan</button>
-            <button className="hover:text-[#295782]">Kebijakan Privasi</button>
-            <button className="hover:text-[#295782]">Syarat Layanan</button>
-            <button className="hover:text-[#295782]">Kontak</button>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }
