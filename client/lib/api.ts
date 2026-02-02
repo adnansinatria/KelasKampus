@@ -1,4 +1,4 @@
-// src/lib/api.ts
+// client/lib/api.ts
 
 import { supabase } from './supabase';
 
@@ -298,6 +298,7 @@ export const api = {
     return apiCall(`/sessions/${sessionId}/questions`);
   },
 
+  // OLD METHOD (Keep for backward compatibility if needed)
   saveAnswer: async (body: {
     session_id: string;
     question_id: string;
@@ -306,6 +307,21 @@ export const api = {
     return apiCall('/answers', {
       method: 'POST',
       body: JSON.stringify(body),
+    });
+  },
+
+  // ✅ NEW: Save Answer ke tabel baru 'student_answers' (IRT Optimized)
+  saveAnswerIRT: async (body: {
+    session_id: string;
+    question_id: number; // Backend uses bigint/number
+    selected_answer: string;
+    is_correct: boolean;
+    question_difficulty: number;     // Snapshot difficulty
+    question_discrimination: number; // Snapshot discrimination
+  }) => {
+    // Menggunakan direct Supabase client untuk UPSERT ke tabel student_answers
+    return supabase.from('student_answers').upsert(body, { 
+      onConflict: 'session_id,question_id' 
     });
   },
 
@@ -334,20 +350,36 @@ export const api = {
   },
 
   /**
-   * Calculate IRT score for a completed session
-   * This calls the Edge Function directly to perform Newton-Raphson calculation
+   * OLD: Calculate IRT score via REST API (Client/Server Hybrid)
    */
   calculateIRTScore: async (sessionId: string, userId: string) => {
     console.log(`🧮 Triggering IRT Calculation for session: ${sessionId}`);
-    // Menggunakan apiCall karena endpoint ini ada di dalam /tryouts prefix (/tryouts/irt/score)
     return apiCall('/irt/score', {
       method: 'POST',
       body: JSON.stringify({ sessionId, userId }),
-    }, 15000); // Timeout lebih lama (15s) karena perhitungan matematika berat
+    }, 15000);
+  },
+
+  // ✅ NEW: Panggil Edge Function 'calculate-irt' (Server-Side Pure)
+  calculateIRTScoreServer: async (sessionId: string) => {
+    console.log(`🧮 Triggering Server-Side IRT Calculation for: ${sessionId}`);
+    
+    // Panggil Edge Function
+    const { data, error } = await supabase.functions.invoke('calculate-irt', {
+      body: { session_id: sessionId },
+    });
+
+    if (error) {
+      console.error('❌ Edge Function Error:', error);
+      throw new Error(error.message || 'Gagal menghitung nilai via server');
+    }
+
+    console.log('✅ Server Result:', data);
+    return data;
   },
 
   /**
-   * Get IRT Report (Optional: jika nanti mau fetch report tanpa hitung ulang)
+   * Get IRT Report (Optional)
    */
   getIRTReport: async (sessionId: string) => {
     return apiCall(`/irt/report/${sessionId}`);
@@ -355,90 +387,54 @@ export const api = {
 
   // ✅ KAMPUS/PRODI METHODS (tanpa /tryouts prefix + CACHE)
   
-  /**
-   * Get all kampus (dengan cache)
-   */
   getKampusList: async () => {
     const cacheKey = 'kampus_list';
-    
-    // ✅ Check cache first
     const cached = apiCache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
+    if (cached) return cached;
 
     console.log("🔄 Fetching kampus from API (not in cache)...");
     const startTime = Date.now();
-    
     const result = await apiCallDirect('/kampus', {}, 5000);
-    
-    // ✅ Cache the result
     apiCache.set(cacheKey, result);
-    
     console.log(`✅ Kampus fetched and cached in ${Date.now() - startTime}ms`);
     return result;
   },
 
-  /**
-   * Get program studi by kampus_id (dengan cache per kampus)
-   */
   getProgramStudiList: async (kampusId: string) => {
     const cacheKey = `prodi_${kampusId}`;
-    
-    // ✅ Check cache first
     const cached = apiCache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
+    if (cached) return cached;
 
     console.log(`🔄 Fetching prodi for kampus ${kampusId} from API (not in cache)...`);
     const startTime = Date.now();
-    
     const result = await apiCallDirect(`/program-studi?kampus_id=${kampusId}`, {}, 5000);
-    
-    // ✅ Cache the result
     apiCache.set(cacheKey, result);
-    
     console.log(`✅ Prodi fetched and cached in ${Date.now() - startTime}ms`);
     return result;
   },
 
-  /**
-   * Get user target for specific tryout (NO CACHE - always fresh)
-   */
   getUserTarget: async (tryoutId: string) => {
     return apiCallDirect(`/user-targets/${tryoutId}`, {}, 5000);
   },
 
-  /**
-   * Save or update user target (NO CACHE - always fresh)
-   */
   saveUserTarget: async (body: {
     tryout_id: string;
     kampus_name: string;
     prodi_name: string;
   }) => {
-    // ✅ Clear cache when saving
     apiCache.clearKey(`prodi_${body.tryout_id}`);
-    
     return apiCallDirect('/user-targets', {
       method: 'POST',
       body: JSON.stringify(body),
     }, 5000);
   },
 
-  /**
-   * Get dashboard statistics
-   */
   getDashboardStats: async () => {
-    return apiCallDirect('/dashboard/stats', {}, 5000); // ✅ 5s timeout
+    return apiCallDirect('/dashboard/stats', {}, 5000);
   },
 
-  /**
-   * Get recent activities (last 3)
-   */
   getRecentActivities: async () => {
-    return apiCallDirect('/dashboard/activities', {}, 5000); // ✅ 5s timeout
+    return apiCallDirect('/dashboard/activities', {}, 5000);
   },
 
   // ✅ ADMIN METHODS (dengan /tryouts prefix)
@@ -451,19 +447,16 @@ export const api = {
     return apiCall(`/admin/tryouts/${tryoutId}`, {}, 10000);
   },
 
-  // ✅ UPDATED: Get questions WITH pembahasan debug
   adminGetTryoutQuestions: async (tryoutId: string) => {
     const endpoint = `/admin/tryouts/${tryoutId}/questions`;
     console.log("🔄 Fetching questions from:", endpoint);
     
     const result = await apiCall(endpoint, {}, 10000);
     
-    // ✅ DEBUG: Check pembahasan in response
     if (result?.data && Array.isArray(result.data)) {
       const withPembahasan = result.data.filter((q: any) => q.pembahasan).length;
       console.log(`📚 Loaded ${result.data.length} questions, ${withPembahasan} with pembahasan`);
       
-      // ✅ DEBUG: Log first question details
       if (result.data.length > 0) {
         const firstQ = result.data[0];
         console.log('📝 First question sample:', {
@@ -505,11 +498,9 @@ export const api = {
     }, 10000);
   },
 
-  // ✅ UPDATED: Bulk insert WITH pembahasan debug
   adminBulkInsertQuestions: async (questions: any[]) => {
     console.log('📤 API: Bulk inserting questions:', questions.length);
     
-    // ✅ DEBUG: Log sample question BEFORE sending
     if (questions.length > 0) {
       const sample = questions[0];
       console.log('📝 API: Sample question to insert:', {
@@ -521,7 +512,6 @@ export const api = {
       });
     }
     
-    // ✅ DEBUG: Count questions with pembahasan
     const withPembahasan = questions.filter(q => q.pembahasan).length;
     console.log(`✅ Sending ${withPembahasan} questions with pembahasan out of ${questions.length}`);
     
@@ -530,7 +520,6 @@ export const api = {
       body: JSON.stringify({ questions }),
     }, 10000);
     
-    // ✅ DEBUG: Log result
     console.log('✅ API: Insert successful, count:', result.count || result.data?.length || 0);
     
     return result;

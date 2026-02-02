@@ -1,10 +1,13 @@
-// hooks/useExamSession.ts - UPDATED WITH IMAGE SUPPORT
+// client/hooks/useExamSession.tsx
+
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
+import { supabase } from '@/lib/supabase'; // Import supabase client
+import toast from 'react-hot-toast'; // Import toast untuk notifikasi error
 
 interface Question {
-  id: string;
+  id: string; // Backend menggunakan BigInt, tapi di frontend biasanya string/number
   soal_text: string;
   opsi_a: string;       
   opsi_b: string;       
@@ -12,12 +15,9 @@ interface Question {
   opsi_d: string;
   urutan: number;
   jawaban_benar: string;
-  image_url?: string | null; // ✅ ADD THIS
-}
-
-interface Answer {
-  question_id: string;
-  selected_answer: string;
+  image_url?: string | null;
+  difficulty?: number;      // ✅ IRT Parameter (b)
+  discrimination?: number;  // ✅ IRT Parameter (a) - Tambahan baru
 }
 
 export function useExamSession(sessionId: string, kategoriId?: string) {
@@ -31,91 +31,64 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
   const [tryoutId, setTryoutId] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
 
-  // ✅ Update timer callback
+  // 1. Update Timer (Periodic Sync)
   const updateTimer = useCallback(async (time: number) => {
     try {
-      console.log('⏱️ Updating timer:', time);
+      if (time % 10 === 0) console.log('⏱️ Updating timer:', time);
       await api.updateTimer(sessionId, time);
-      console.log('✅ Timer updated');
     } catch (error) {
       console.error('❌ Error updating timer:', error);
     }
   }, [sessionId]);
 
-  // ✅ Auto submit callback
+  // 2. Auto Submit (Saat Waktu Habis)
   const handleAutoSubmit = useCallback(async () => {
     try {
-      console.log('⏰ Auto-submitting exam (time expired)');
-      await api.submitTryout(sessionId);
-      console.log('✅ Exam auto-submitted');
-      navigate(`/tryout/${tryoutId}/result?session=${sessionId}`);
+      console.log('⏰ Time expired. Auto-submitting...');
+      // Panggil fungsi submit yang sama dengan tombol manual
+      await submitExamLogic(); 
     } catch (error) {
       console.error('❌ Error auto-submitting:', error);
     }
   }, [sessionId, tryoutId, navigate]);
 
-  // Fetch session data on mount
-  useEffect(() => {
-    if (sessionId) {
-      fetchSessionData();
-    }
-  }, [sessionId]);
-
-  // Timer countdown effect
   useEffect(() => {
     if (timeRemaining > 0 && !isLoading) {
       const timer = setInterval(() => {
         setTimeRemaining(prev => {
           const newTime = prev - 1;
-
-          // Auto-save timer every 30 seconds
-          if (newTime % 30 === 0) {
-            updateTimer(newTime);
-          }
-
-          // Auto-submit when time is up
+          if (newTime % 30 === 0) updateTimer(newTime);
           if (newTime <= 0) {
             handleAutoSubmit();
             return 0;
           }
-
           return newTime;
         });
       }, 1000);
-
       return () => clearInterval(timer);
     }
   }, [timeRemaining, isLoading, updateTimer, handleAutoSubmit]);
 
-  // ✅ Fetch session data via API (WITH IMAGE SUPPORT)
+  // 3. Fetch Data Awal
   const fetchSessionData = async () => {
     try {
       setIsLoading(true);
-
       console.log('🔍 Fetching session data for:', sessionId);
 
       const sessionResponse = await api.getSession(sessionId);
-      console.log('✅ Session data from API:', sessionResponse);
-
       const sessionData = sessionResponse?.data || sessionResponse;
 
-      if (!sessionData) {
-        throw new Error('Session data not found');
-      }
+      if (!sessionData) throw new Error('Session data not found');
 
       setTryoutId(sessionData.tryout_id);
       setTimeRemaining(sessionData.time_remaining || 0);
 
-      console.log('🔍 Fetching questions for session:', sessionId);
-
       const questionsResponse = await api.getQuestions(sessionId);
-      console.log('✅ Questions from API:', questionsResponse);
-
       const questionData = questionsResponse?.questions || questionsResponse;
 
       if (Array.isArray(questionData)) {
-        // ✅ Map questions to include image_url
-        const questionsWithImages = questionData.map((q: any) => ({
+        // ✅ Mapping Data Soal (termasuk IRT params)
+        const questionsWithData = questionData.map((q: any) => ({
           id: q.id,
           soal_text: q.soal_text,
           opsi_a: q.opsi_a,
@@ -124,58 +97,65 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
           opsi_d: q.opsi_d,
           urutan: q.urutan,
           jawaban_benar: q.jawaban_benar,
-          image_url: q.image_url || null, // ✅ Include image URL
+          image_url: q.image_url || null,
+          difficulty: q.difficulty || 0,          // Default 0
+          discrimination: q.discrimination || 1.0 // Default 1.0 (Standard Rasch/2PL)
         }));
 
-        setQuestions(questionsWithImages);
-        console.log(`✅ Questions loaded: ${questionsWithImages.length}`);
-        
-        // ✅ Log images for debugging
-        const questionsWithImage = questionsWithImages.filter(q => q.image_url);
-        if (questionsWithImage.length > 0) {
-          console.log(`🖼️ Questions with images: ${questionsWithImage.length}`, 
-            questionsWithImage.map(q => ({ id: q.id, url: q.image_url }))
-          );
-        }
-      } else {
-        console.warn('⚠️ Questions is not array:', questionData);
+        setQuestions(questionsWithData);
+        console.log(`✅ Questions loaded: ${questionsWithData.length} (IRT Ready)`);
       }
 
       const answersData = questionsResponse?.answers || {};
       setAnswers(answersData);
-      console.log('✅ Existing answers loaded:', Object.keys(answersData).length);
-
-      // ✅ Load bookmarks dari response
+      
       const bookmarksData = questionsResponse?.bookmarked_questions || [];
-      setBookmarkedQuestions(
-        Array.isArray(bookmarksData) ? bookmarksData : []
-      );
-      console.log('✅ Bookmarks loaded:', bookmarksData);
+      setBookmarkedQuestions(Array.isArray(bookmarksData) ? bookmarksData : []);
+
     } catch (error) {
       console.error('❌ Error fetching session data:', error);
+      toast.error('Gagal memuat soal ujian.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // ✅ Save answer via API
+  useEffect(() => {
+    if (sessionId) fetchSessionData();
+  }, [sessionId]);
+
+  // 4. Save Answer (Logic Baru untuk IRT)
   const saveAnswer = async (questionId: string, answer: string) => {
     try {
+      // Optimistic Update UI
       setAnswers(prev => ({ ...prev, [questionId]: answer }));
-
-      console.log('💾 Saving answer via API:', questionId, answer);
-
       setIsSaving(true);
 
-      await api.saveAnswer({
+      // Cari data soal untuk dapat parameter IRT
+      const currentQuestion = questions.find(q => String(q.id) === String(questionId));
+      
+      if (!currentQuestion) {
+        console.warn('⚠️ Soal tidak ditemukan di state lokal');
+        return;
+      }
+
+      const isCorrect = answer === currentQuestion.jawaban_benar;
+
+      // ✅ Simpan ke tabel 'student_answers' via API baru
+      await api.saveAnswerIRT({
         session_id: sessionId,
-        question_id: questionId,
-        selected_answer: answer
+        question_id: Number(questionId), // Konversi ke number (backend bigint)
+        selected_answer: answer,
+        is_correct: isCorrect,
+        question_difficulty: currentQuestion.difficulty || 0,
+        question_discrimination: currentQuestion.discrimination || 1.0,
       });
 
-      console.log('✅ Answer saved:', questionId, answer);
     } catch (error) {
       console.error('❌ Error saving answer:', error);
+      toast.error('Gagal menyimpan jawaban. Cek koneksi internet.');
+      
+      // Rollback jika gagal
       setAnswers(prev => {
         const updated = { ...prev };
         delete updated[questionId];
@@ -186,29 +166,48 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
     }
   };
 
-  // ✅ Save bookmarks to API + update state
+  // 5. Save Bookmarks
   const saveBookmarks = async (bookmarks: number[]) => {
     try {
-      console.log('💾 Saving bookmarks to API:', bookmarks);
       setBookmarkedQuestions(bookmarks);
       await api.saveBookmarks(sessionId, bookmarks);
-      console.log('✅ Bookmarks saved');
     } catch (error) {
       console.error('❌ Error saving bookmarks:', error);
     }
   };
 
-  // ✅ Manual submit via API
-  const submitExam = async () => {
+  // 6. Submit Exam Logic (Server-Side Trigger)
+  const submitExamLogic = async () => {
     try {
-      console.log('📤 Submitting exam manually');
-      const result = await api.submitTryout(sessionId);
-      console.log('✅ Exam submitted:', result);
+      console.log('📤 Submitting exam to server...');
+      
+      // A. Update status session jadi 'completed' (Syarat backend sebelum hitung nilai)
+      const { error: updateError } = await supabase
+        .from('tryout_sessions')
+        .update({ status: 'completed' })
+        .eq('id', sessionId);
+
+      if (updateError) throw updateError;
+
+      // B. 🔥 Panggil Edge Function untuk menghitung nilai (Server-Side Scoring)
+      console.log('🧮 Triggering server calculation...');
+      await api.calculateIRTScoreServer(sessionId);
+      
+      console.log('✅ Exam submitted & scored successfully');
+      
+      // C. Redirect ke halaman hasil
       navigate(`/tryout/${tryoutId}/result?session=${sessionId}`);
-    } catch (error) {
+      
+    } catch (error: any) {
       console.error('❌ Error submitting exam:', error);
+      toast.error(`Gagal mengirim jawaban: ${error.message || 'Server error'}`);
       throw error;
     }
+  };
+
+  // Wrapper function untuk dipanggil dari UI
+  const submitExam = async () => {
+    await submitExamLogic();
   };
 
   return {

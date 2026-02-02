@@ -4,8 +4,10 @@
 interface Question {
   id: string;
   jawaban_benar: string;
+  // Ubah jadi opsional dan dukung penamaan dari DB (difficulty vs irt_difficulty)
+  difficulty?: number;      // Dari DB
+  irt_difficulty?: number;  // Alias
   irt_discrimination?: number;
-  irt_difficulty?: number;
   irt_guessing?: number;
   topik?: string;
   kategori?: string;
@@ -119,46 +121,56 @@ export function calculateIRTScore(
   questions: Question[],
   userAnswers: Record<string, string>
 ): ScoringResult {
-  console.log('🔄 Attempting IRT 3PL scoring...');
+  console.log('🔄 Attempting IRT Scoring (Auto-detect Model)...');
 
   try {
-    // Validate IRT parameters
-    const validQuestions = questions.filter(q => 
-      typeof q.irt_discrimination === 'number' &&
-      typeof q.irt_difficulty === 'number' &&
-      typeof q.irt_guessing === 'number' &&
-      !isNaN(q.irt_discrimination) &&
-      !isNaN(q.irt_difficulty) &&
-      !isNaN(q.irt_guessing)
-    );
-
-    if (validQuestions.length < questions.length * 0.5) {
-      console.warn('⚠️ Insufficient IRT parameters (< 50%)');
-      throw new Error('Insufficient IRT data');
-    }
-
-    // Prepare data
     const responses: boolean[] = [];
     const discriminations: number[] = [];
     const difficulties: number[] = [];
     const guessings: number[] = [];
+    
+    let validCount = 0;
 
-    validQuestions.forEach(q => {
+    questions.forEach(q => {
+      // ✅ LOGIKA ADAPTOR:
+      // Ambil difficulty dari q.difficulty (AddQuestionPage) atau q.irt_difficulty
+      const b = q.difficulty ?? q.irt_difficulty;
+      
+      // Jika difficulty tidak ada, skip soal ini (sangat fatal)
+      if (typeof b !== 'number') return;
+
+      // ✅ DEFAULT VALUES (Ini kuncinya!):
+      // Jika Discrimination (a) kosong -> Default 1.0 (Standar Rasch)
+      const a = q.irt_discrimination ?? 1.0;
+      
+      // Jika Guessing (c) kosong -> Default 0.0 (Atau 0.25 untuk Pilihan Ganda 4 opsi)
+      // Kita pakai 0.0 agar murni mengukur kemampuan tanpa faktor tebak-tebakan jika data belum matang
+      const c = q.irt_guessing ?? 0.0; 
+
       const userAnswer = userAnswers[q.id];
+      // Pastikan ada jawaban, jika tidak dianggap salah (false)
       const isCorrect = userAnswer === q.jawaban_benar;
       
       responses.push(isCorrect);
-      discriminations.push(q.irt_discrimination!);
-      difficulties.push(q.irt_difficulty!);
-      guessings.push(q.irt_guessing!);
+      discriminations.push(a);
+      difficulties.push(b);
+      guessings.push(c);
+      validCount++;
     });
+
+    // Validasi jumlah data
+    if (validCount === 0) {
+      throw new Error('Tidak ada soal yang memiliki parameter difficulty.');
+    }
+
+    console.log(`📊 IRT Data: ${validCount} valid questions processed.`);
 
     // Estimate theta
     const { theta, se } = estimateThetaNewtonRaphson(
       responses,
-      discriminations,
+      discriminations, // Sekarang array ini pasti terisi default value
       difficulties,
-      guessings
+      guessings      // Array ini juga pasti terisi default value
     );
 
     // Convert to 0-100 score
