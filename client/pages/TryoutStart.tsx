@@ -1,6 +1,9 @@
-import { useState, useEffect } from 'react';
+// client/pages/TryoutStart.tsx - REFACTORED VERSION
+// ✅ Implementasi Conditional UI State dan Auto-Refresh pada Window Focus
+
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Play, Clock, FileText, Calendar, CheckCircle } from 'lucide-react';
+import { ArrowLeft, Play, Clock, FileText, Calendar, CheckCircle, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import toast from 'react-hot-toast';
@@ -8,7 +11,7 @@ import Header from '@/components/Header';
 import SubtestList from '@/components/tryout/SubtestList';
 import TargetSelectionModal from '@/components/tryout/TargetSelectionModal';
 import { api } from '@/lib/api';
-import { supabase } from '@/lib/supabase'; // ✅ Import supabase
+import { supabase } from '@/lib/supabase';
 import { useTryoutData } from '@/hooks/useTryoutData';
 
 export default function TryoutStart() {
@@ -28,6 +31,40 @@ export default function TryoutStart() {
     refreshData
   } = useTryoutData(tryoutId!);
 
+  // ✅ Auto-refresh data saat window mendapat fokus kembali
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      console.log('🔄 Window focused, refreshing data...');
+      refreshData();
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+    return () => window.removeEventListener('focus', handleWindowFocus);
+  }, [refreshData]);
+
+  // ✅ FIX #3: Gunakan ref agar interval hanya dibuat SEKALI.
+  // Sebelumnya: deps [isLoading, tryout, refreshData] menyebabkan interval di-reset setiap kali
+  // refreshData dipanggil (isLoading jadi true → false → effect re-run → timer mulai dari nol lagi).
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const refreshDataRef = useRef(refreshData);
+
+  // Selalu sinkronkan ref ke fungsi refreshData terbaru tanpa memicu re-run effect
+  useEffect(() => {
+    refreshDataRef.current = refreshData;
+  }, [refreshData]);
+
+  // Setup interval hanya sekali saat mount, cleanup saat unmount
+  useEffect(() => {
+    intervalRef.current = setInterval(() => {
+      console.log('🔄 Auto-refreshing data (30s interval)...');
+      refreshDataRef.current();
+    }, 30000);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []); // ← deps kosong, interval tidak pernah di-reset
+
   useEffect(() => {
     if (!isLoading && !targetInfo) {
       setShowTargetModal(true);
@@ -40,8 +77,6 @@ export default function TryoutStart() {
     }
   }, []);
 
-  // Di dalam components/pages/TryoutStart.tsx
-
   const handleStartTryout = async (kategoriKode?: string) => {
     if (!targetInfo) {
       toast.error('Pilih kampus dan jurusan terlebih dahulu!');
@@ -52,15 +87,14 @@ export default function TryoutStart() {
     try {
       setIsStarting(true);
       
-      // 1. Cek apakah sudah ada session aktif (hasil beli token tadi)
       const { data: { user } } = await supabase.auth.getUser();
       
       // Cari session terakhir yang statusnya in_progress/purchased
       const { data: existingSession, error: sessionError } = await supabase
         .from('tryout_sessions')
-        .select('id')
+        .select('id, status')
         .eq('tryout_id', tryoutId)
-        .eq('user_id', currentUser?.user_id) // Pastikan currentUser sudah ada user_id
+        .eq('user_id', currentUser?.user_id)
         .in('status', ['in_progress', 'purchased']) 
         .order('created_at', { ascending: false })
         .limit(1)
@@ -68,7 +102,6 @@ export default function TryoutStart() {
 
       let sessionId = existingSession?.id;
 
-      // 2. Jika Session ada (Skenario Normal Beli Pakai Token) -> UPDATE TARGETNYA
       if (sessionId) {
         console.log('✅ Menggunakan session yang sudah dibeli:', sessionId);
         
@@ -97,7 +130,7 @@ export default function TryoutStart() {
 
       if (!sessionId) throw new Error('Gagal mendapatkan Session ID');
 
-      // 4. Navigasi ke Ujian
+      // Navigasi ke Ujian
       const params = new URLSearchParams();
       params.set('session', sessionId);
       if (kategoriKode) params.set('kategori', kategoriKode);
@@ -112,30 +145,49 @@ export default function TryoutStart() {
     }
   };
 
-  // ✅ NEW: Handler untuk submit final setelah semua subtest selesai
-  const handleSubmitFinal = async () => {
+  // ✅ Handler untuk melihat hasil (jika sudah completed)
+  const handleViewResult = async () => {
     try {
       setIsStarting(true);
       
-      // ✅ Cek apakah ada subtest yang belum selesai
-      const incompleteSub = Object.values(progressData).find(
-        (p) => p.status !== 'completed'
-      );
-      
-      if (incompleteSub) {
-        toast.error('Selesaikan semua subtest terlebih dahulu!');
-        setIsStarting(false);
-        return;
-      }
-
-      toast.loading('Mengkalkulasi hasil akhir...');
-      
-      // ✅ Submit tryout (ambil session ID dari subtest mana saja yang sudah completed)
+      // Ambil session yang sudah completed
       const { data: sessions, error } = await supabase
         .from('tryout_sessions')
         .select('id')
         .eq('tryout_id', tryoutId)
         .eq('user_id', currentUser?.user_id)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error || !sessions?.id) {
+        throw new Error('Session hasil tidak ditemukan');
+      }
+
+      // Navigate ke result page
+      navigate(`/tryout/${tryoutId}/result?session=${sessions.id}`);
+      
+    } catch (err: any) {
+      console.error('❌ Error viewing result:', err);
+      toast.error(err.message || 'Gagal membuka hasil');
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  // ✅ Handler untuk lanjutkan tryout (jika masih in_progress)
+  const handleContinueTryout = async () => {
+    try {
+      setIsStarting(true);
+      
+      // Ambil session yang masih in_progress
+      const { data: sessions, error } = await supabase
+        .from('tryout_sessions')
+        .select('id')
+        .eq('tryout_id', tryoutId)
+        .eq('user_id', currentUser?.user_id)
+        .eq('status', 'in_progress')
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
@@ -144,28 +196,88 @@ export default function TryoutStart() {
         throw new Error('Session tidak ditemukan');
       }
 
-      // ✅ Submit tryout via API
-      await api.submitTryout(sessions.id);
-
-      toast.dismiss();
-      toast.success('Tryout berhasil diselesaikan!');
-      
-      // ✅ Navigate ke result
-      navigate(`/tryout/${tryoutId}/result?session=${sessions.id}`);
+      // Navigate ke exam page
+      const params = new URLSearchParams();
+      params.set('session', sessions.id);
+      navigate(`/tryout/${tryoutId}/exam?${params.toString()}`);
       
     } catch (err: any) {
-      console.error('❌ Error submitting final:', err);
-      toast.dismiss();
-      toast.error(err.message || 'Gagal submit tryout');
+      console.error('❌ Error continuing tryout:', err);
+      toast.error(err.message || 'Gagal melanjutkan tryout');
     } finally {
       setIsStarting(false);
     }
   };
 
-  // ✅ Cek apakah semua subtest sudah selesai
-  const allSubtestsCompleted = Object.keys(progressData).length > 0 && Object.values(progressData).every(
-    (p) => p.status === 'completed'
-  );
+  // ✅ CRITICAL: Determine button state berdasarkan progress
+  const getButtonState = () => {
+    const progressValues = Object.values(progressData);
+    
+    // Cek apakah ada session yang in_progress
+    const hasInProgress = progressValues.some(p => p.status === 'in_progress');
+    
+    // Cek apakah semua subtest completed
+    const allCompleted = progressValues.length > 0 && 
+                        progressValues.every(p => p.status === 'completed');
+    
+    if (allCompleted) {
+      return {
+        type: 'view_result',
+        label: 'Lihat Hasil',
+        icon: <Eye className="w-5 h-5" />,
+        action: handleViewResult,
+        gradient: 'from-green-500 to-emerald-600'
+      };
+    }
+    
+    if (hasInProgress) {
+      return {
+        type: 'continue',
+        label: 'Lanjutkan Tryout',
+        icon: <Play className="w-5 h-5" />,
+        action: handleContinueTryout,
+        gradient: 'from-[#295782] to-[#1e4060]'
+      };
+    }
+    
+    return {
+      type: 'start',
+      label: 'Mulai Tryout',
+      icon: <Play className="w-5 h-5" />,
+      action: () => {
+        // Cari subtest pertama yang belum dikerjakan
+        let firstIncompleteKategori: string | null = null;
+        
+        const kelompokOrder = ['TPS', 'Literasi', 'Matematika', 'Sains', 'Sosial'];
+        
+        for (const kelompok of kelompokOrder) {
+          const kategorisInGroup = groupedKategoris[kelompok];
+          if (!kategorisInGroup) continue;
+          
+          const sortedKategoris = [...kategorisInGroup].sort((a, b) => a.urutan - b.urutan);
+          
+          for (const kategori of sortedKategoris) {
+            const progress = progressData[kategori.id];
+            
+            if (!progress || progress.status !== 'completed') {
+              firstIncompleteKategori = kategori.id;
+              break;
+            }
+          }
+          
+          if (firstIncompleteKategori) break;
+        }
+        
+        if (firstIncompleteKategori) {
+          console.log('Starting first incomplete kategori:', firstIncompleteKategori);
+          handleStartTryout(firstIncompleteKategori);
+        }
+      },
+      gradient: 'from-[#295782] to-[#1e4060]'
+    };
+  };
+
+  const buttonState = getButtonState();
 
   // Loading state
   if (isLoading) {
@@ -310,82 +422,53 @@ export default function TryoutStart() {
               </ul>
             </div>
 
-            {allSubtestsCompleted ? (
-              <button
-                onClick={handleSubmitFinal}
-                disabled={isStarting}
-                className="w-full py-4 rounded-xl text-base font-bold shadow-lg transition-all flex items-center justify-center gap-2 bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isStarting ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    Memproses...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="w-5 h-5" />
-                    Lihat Hasil Akhir
-                  </>
-                )}
-              </button>
-            ) : (
-              <button
-                onClick={() => {
-                  let firstIncompleteKategori: string | null = null;
-                  
-                  const kelompokOrder = ['TPS', 'Literasi', 'Matematika', 'Sains', 'Sosial'];
-                  
-                  for (const kelompok of kelompokOrder) {
-                    const kategorisInGroup = groupedKategoris[kelompok];
-                    if (!kategorisInGroup) continue;
-                    
-                    // Sort by urutan
-                    const sortedKategoris = [...kategorisInGroup].sort((a, b) => a.urutan - b.urutan);
-                    
-                    for (const kategori of sortedKategoris) {
-                      const progress = progressData[kategori.id];
-                      
-                      // Cek apakah belum completed
-                      if (!progress || progress.status !== 'completed') {
-                        firstIncompleteKategori = kategori.id;
-                        break;
-                      }
-                    }
-                    
-                    if (firstIncompleteKategori) break;
-                  }
-                  
-                  if (firstIncompleteKategori) {
-                    console.log('Starting first incomplete kategori:', firstIncompleteKategori);
-                    handleStartTryout(firstIncompleteKategori);
-                  }
-                }}
-                disabled={isStarting || !targetInfo}
-                className={`w-full py-4 rounded-xl text-base font-bold shadow-lg transition-all flex items-center justify-center gap-2 ${
-                  targetInfo
-                    ? 'bg-gradient-to-r from-[#295782] to-[#1e4060] text-white hover:shadow-xl'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                }`}
-              >
-                {isStarting ? (
-                  <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    Memulai...
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-5 h-5" />
-                    Mulai Tryout
-                  </>
-                )}
-              </button>
-            )}
+            {/* ✅ CONDITIONAL ACTION BUTTON */}
+            <button
+              onClick={buttonState.action}
+              disabled={isStarting || (!targetInfo && buttonState.type === 'start')}
+              className={`w-full py-4 rounded-xl text-base font-bold shadow-lg transition-all flex items-center justify-center gap-2 ${
+                targetInfo || buttonState.type !== 'start'
+                  ? `bg-gradient-to-r ${buttonState.gradient} text-white hover:shadow-xl disabled:opacity-50`
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              {isStarting ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  Memproses...
+                </>
+              ) : (
+                <>
+                  {buttonState.icon}
+                  {buttonState.label}
+                </>
+              )}
+            </button>
 
             {/* Warning message */}
-            {!targetInfo && !allSubtestsCompleted && (
+            {!targetInfo && buttonState.type === 'start' && (
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center">
                 <p className="text-xs text-orange-600 font-medium">
                   ⚠️ Pilih kampus dan program studi terlebih dahulu
+                </p>
+              </div>
+            )}
+
+            {/* Status Info */}
+            {buttonState.type === 'view_result' && (
+              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+                <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-2" />
+                <p className="text-sm text-green-600 font-semibold">
+                  ✅ Semua subtest telah selesai!
+                </p>
+              </div>
+            )}
+
+            {buttonState.type === 'continue' && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+                <Clock className="w-8 h-8 text-blue-600 mx-auto mb-2" />
+                <p className="text-sm text-blue-600 font-semibold">
+                  📝 Tryout sedang berlangsung
                 </p>
               </div>
             )}

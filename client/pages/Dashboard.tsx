@@ -1,4 +1,7 @@
-import { useEffect, useState } from "react";
+// client/pages/Dashboard.tsx - REFACTORED VERSION
+// ✅ Optimasi Data Integrity & Lifecycle Management dengan Auto-Refresh
+
+import { useEffect, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { FileText, CheckCircle, Clock, ArrowRight, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,12 +10,10 @@ import { api } from "@/lib/api";
 import { toast } from "react-hot-toast";
 import Header from "@/components/Header";
 
-
 interface UserProfile {
   nama: string;
   inisial: string;
 }
-
 
 interface Transaction {
   id: string;
@@ -22,7 +23,6 @@ interface Transaction {
   created_at: string;
 }
 
-
 const decodeToken = (jwt: string) => {
   try { 
     return JSON.parse(atob(jwt.split('.')[1])); 
@@ -30,7 +30,6 @@ const decodeToken = (jwt: string) => {
     return null; 
   }
 };
-
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -42,115 +41,8 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
 
-
-  useEffect(() => {
-    loadDashboardData();
-  }, [navigate]);
-
-
-  const loadDashboardData = async () => {
-    try {
-      setIsLoading(true);
-      console.log("⏱️ [START] Loading dashboard data...");
-      const startTime = Date.now();
-
-      // 1. Ambil sesi aktif
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      let currentUserId: string | null = null;
-
-      // 2. LOGIKA UNTUK GOOGLE LOGIN / SUPABASE SESSION
-      if (session && !sessionError) {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        
-        if (!authUser) {
-          navigate("/signin", { replace: true });
-          return;
-        }
-
-        // Cek data di tabel users
-        const { data: userData, error: userError } = await supabase
-          .from("users")
-          .select("user_id, nama_lengkap, photo_profile")
-          .eq("auth_id", authUser.id)
-          .single();
-
-        // JIKA AKUN BARU: Data mungkin belum ada di tabel 'users'
-        // Kita gunakan data dari authUser metadata sebagai fallback agar tidak ter-reject
-        if (userError || !userData) {
-          console.warn("⚠️ User data not in table yet, using session metadata.");
-          
-          // Gunakan ID dari auth sebagai sementara agar fetch stats tidak error
-          currentUserId = authUser.id; 
-          setUserPhoto(authUser.user_metadata?.avatar_url || null);
-
-          let nama = authUser.user_metadata?.full_name || authUser.user_metadata?.nama_lengkap || authUser.email?.split("@")[0] || "Pengguna";
-          const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
-          setUser({ nama, inisial });
-        } else {
-          // JIKA AKUN LAMA: Gunakan data resmi dari tabel users
-          currentUserId = userData.user_id;
-          setUserPhoto(userData.photo_profile || null);
-
-          let nama = userData.nama_lengkap || authUser.user_metadata?.full_name || "Pengguna";
-          const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
-          setUser({ nama, inisial });
-        }
-      } 
-      // 3. LOGIKA UNTUK LOGIN MANUAL (LOCALSTORAGE)
-      else {
-        const token = localStorage.getItem("auth_token");
-        if (!token) {
-          navigate("/signin", { replace: true });
-          return;
-        }
-
-        const payload = decodeToken(token);
-        if (!payload) {
-          localStorage.removeItem("auth_token");
-          navigate("/signin", { replace: true });
-          return;
-        }
-
-        currentUserId = payload.user_id;
-
-        const { data: userData, error: userError } = await supabase
-          .from("users")
-          .select("nama_lengkap, username, photo_profile")
-          .eq("user_id", payload.user_id)
-          .single();
-
-        if (userData) {
-          setUserPhoto(userData.photo_profile || null);
-        }
-
-        const nama = userData?.nama_lengkap || payload.nama_lengkap || payload.email?.split("@")[0] || "Pengguna";
-        const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
-        setUser({ nama, inisial });
-      }
-
-      setUserId(currentUserId);
-
-      // 4. Load data pendukung (Stats, Activity, Transactions)
-      // Gunakan currentUserId yang sudah didapat
-      await Promise.all([
-        fetchDashboardStats(currentUserId),
-        fetchRecentActivities(),
-        loadRecentTransactions(currentUserId),
-      ]);
-
-      console.log(`⏱️ [END] Dashboard loaded in ${Date.now() - startTime}ms`);
-
-    } catch (err) {
-      console.error("Gagal mengambil data dashboard:", err);
-      // Jangan langsung hapus token jika hanya error jaringan
-      navigate("/signin", { replace: true });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const fetchDashboardStats = async (currentUserId: string | null) => {
+  // ✅ Memoized fetch functions untuk mencegah re-creation
+  const fetchDashboardStats = useCallback(async (currentUserId: string | null) => {
     try {
       console.log("📊 Fetching dashboard stats...");
       const startTime = Date.now();
@@ -161,7 +53,7 @@ export default function Dashboard() {
         return;
       }
 
-      // ✅ FIXED: Only filter by status (no completed_at check)
+      // Get completed sessions
       const { data: sessions, error } = await supabase
         .from("tryout_sessions")
         .select("tryout_id, kategori_id, status")
@@ -232,24 +124,22 @@ export default function Dashboard() {
         }
       }
 
-      console.log(`✅ Fully completed tryouts: ${fullyCompletedCount}`);
+      console.log(`✅ Fully completed tryouts: ${fullyCompletedCount} (${Date.now() - startTime}ms)`);
       setTryoutCount(fullyCompletedCount);
 
     } catch (err: any) {
       console.error("❌ Error:", err);
       setTryoutCount(0);
     }
-  };
+  }, []);
 
-  const fetchRecentActivities = async () => {
+  const fetchRecentActivities = useCallback(async () => {
     try {
       console.log("📋 Fetching recent activities via API...");
       const startTime = Date.now();
 
-
       const response = await api.getRecentActivities();
       const data = response?.data || response;
-
 
       if (Array.isArray(data)) {
         const mapped = data.map((session: any) => {
@@ -272,7 +162,6 @@ export default function Dashboard() {
               score = `Progress: ${progress}%`;
             }
           }
-
 
           const iconBg = status === "Selesai" 
             ? "linear-gradient(135deg, rgba(0, 0, 0, 0.00) 0%, #A4F4CF 100%)" 
@@ -303,25 +192,22 @@ export default function Dashboard() {
         });
         
         setActivities(mapped);
-        console.log(`✅ Activities loaded in ${Date.now() - startTime}ms:`, mapped);
+        console.log(`✅ Activities loaded (${mapped.length} items, ${Date.now() - startTime}ms)`);
       }
     } catch (err) {
       console.error("❌ Error fetching activities:", err);
       setActivities([]);
     }
-  };
+  }, []);
 
-
-  const loadRecentTransactions = async (currentUserId: string | null) => {
+  const loadRecentTransactions = useCallback(async (currentUserId: string | null) => {
     try {
       console.log('🔍 Fetching recent transactions...');
-
 
       if (!currentUserId) {
         console.warn('⚠️ User ID not found');
         return;
       }
-
 
       const { data, error } = await supabase
         .from('transactions')
@@ -336,12 +222,10 @@ export default function Dashboard() {
         .order('created_at', { ascending: false })
         .limit(3);
 
-
       if (error) {
         console.error('❌ Transactions error:', error);
         return;
       }
-
 
       const transformed = (data || []).map((t: any) => ({
         id: t.id,
@@ -351,16 +235,140 @@ export default function Dashboard() {
         created_at: t.created_at
       }));
 
-
       console.log('✅ Recent transactions loaded:', transformed);
       setRecentTransactions(transformed);
-
 
     } catch (error) {
       console.error('❌ Error loading transactions:', error);
     }
-  };
+  }, []);
 
+  // ✅ Main data loading function dengan proper error handling
+  const loadDashboardData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      console.log("⏱️ [START] Loading dashboard data...");
+      const startTime = Date.now();
+
+      // 1. Ambil sesi aktif
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      let currentUserId: string | null = null;
+
+      // 2. LOGIKA UNTUK GOOGLE LOGIN / SUPABASE SESSION
+      if (session && !sessionError) {
+        const { data: { user: authUser } } = await supabase.auth.getUser();
+        
+        if (!authUser) {
+          navigate("/signin", { replace: true });
+          return;
+        }
+
+        // Cek data di tabel users
+        const { data: userData, error: userError } = await supabase
+          .from("users")
+          .select("user_id, nama_lengkap, photo_profile")
+          .eq("auth_id", authUser.id)
+          .single();
+
+        // JIKA AKUN BARU: Data mungkin belum ada di tabel 'users'
+        if (userError || !userData) {
+          console.warn("⚠️ User data not in table yet, using session metadata.");
+          
+          currentUserId = authUser.id; 
+          setUserPhoto(authUser.user_metadata?.avatar_url || null);
+
+          let nama = authUser.user_metadata?.full_name || authUser.user_metadata?.nama_lengkap || authUser.email?.split("@")[0] || "Pengguna";
+          const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
+          setUser({ nama, inisial });
+        } else {
+          currentUserId = userData.user_id;
+          setUserPhoto(userData.photo_profile || null);
+
+          let nama = userData.nama_lengkap || authUser.user_metadata?.full_name || "Pengguna";
+          const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
+          setUser({ nama, inisial });
+        }
+      } 
+      // 3. LOGIKA UNTUK LOGIN MANUAL (LOCALSTORAGE)
+      else {
+        const token = localStorage.getItem("auth_token");
+        if (!token) {
+          navigate("/signin", { replace: true });
+          return;
+        }
+
+        const payload = decodeToken(token);
+        if (!payload) {
+          localStorage.removeItem("auth_token");
+          navigate("/signin", { replace: true });
+          return;
+        }
+
+        currentUserId = payload.user_id;
+
+        const { data: userData, error: userError } = await supabase
+          .from("users")
+          .select("nama_lengkap, username, photo_profile")
+          .eq("user_id", payload.user_id)
+          .single();
+
+        if (userData) {
+          setUserPhoto(userData.photo_profile || null);
+        }
+
+        const nama = userData?.nama_lengkap || payload.nama_lengkap || payload.email?.split("@")[0] || "Pengguna";
+        const inisial = nama.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase();
+        setUser({ nama, inisial });
+      }
+
+      setUserId(currentUserId);
+
+      // 4. ✅ CRITICAL: Load data pendukung secara paralel
+      await Promise.all([
+        fetchDashboardStats(currentUserId),
+        fetchRecentActivities(),
+        loadRecentTransactions(currentUserId),
+      ]);
+
+      console.log(`⏱️ [END] Dashboard loaded in ${Date.now() - startTime}ms`);
+
+    } catch (err) {
+      console.error("Gagal mengambil data dashboard:", err);
+      navigate("/signin", { replace: true });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [navigate, fetchDashboardStats, fetchRecentActivities, loadRecentTransactions]);
+
+  // ✅ Initial load
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+  // ✅ Auto-refresh saat window mendapat fokus kembali
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      console.log('🔄 Window focused, refreshing dashboard data...');
+      loadDashboardData();
+    };
+
+    window.addEventListener('focus', handleWindowFocus);
+    return () => window.removeEventListener('focus', handleWindowFocus);
+  }, [loadDashboardData]);
+
+  // ✅ Auto-refresh secara berkala (setiap 60 detik)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      console.log('🔄 Auto-refreshing dashboard data...');
+      if (userId) {
+        fetchDashboardStats(userId);
+        fetchRecentActivities();
+      }
+    }, 60000); // 60 seconds
+
+    return () => clearInterval(interval);
+  }, [userId, fetchDashboardStats, fetchRecentActivities]);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('id-ID', {
@@ -370,7 +378,6 @@ export default function Dashboard() {
     }).format(price);
   };
 
-
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('id-ID', {
       day: 'numeric',
@@ -378,7 +385,6 @@ export default function Dashboard() {
       year: 'numeric'
     });
   };
-
 
   const getKategoriName = (kategoriId: string): string => {
     const kategoriMap: Record<string, string> = {
@@ -393,7 +399,6 @@ export default function Dashboard() {
     return kategoriMap[kategoriId] || kategoriId;
   };
 
-
   function humanizeDate(dateStr: string) {
     try {
       const d = new Date(dateStr);
@@ -407,7 +412,6 @@ export default function Dashboard() {
     }
   }
 
-
   const handleActivityClick = (activity: any) => {
     if (activity.status === "Selesai") {
       navigate(`/tryout/${activity.tryoutId}/start`);
@@ -418,7 +422,6 @@ export default function Dashboard() {
       navigate(`/tryout/${activity.tryoutId}/exam?${params.toString()}`);
     }
   };
-
 
   if (!user || isLoading) {
     return (
@@ -431,7 +434,6 @@ export default function Dashboard() {
     );
   }
 
-
   return (
     <div className="min-h-screen bg-white flex flex-col">
       <Header 
@@ -440,7 +442,6 @@ export default function Dashboard() {
         activeMenu="dashboard"
         variant="default"
       />
-
 
       <main className="flex-1 bg-[#EFF6FB] px-4 md:px-8 py-4 md:py-6 space-y-4">
         {/* Hero Banner */}
@@ -466,7 +467,6 @@ export default function Dashboard() {
           />
         </div>
 
-
         {/* Stats Card */}
         <div className="flex justify-center">
           <div className="relative w-full max-w-[520px] h-[90px] md:h-[100px] rounded-xl bg-gradient-to-b from-[#16A34A] to-[#15803D] shadow-md p-4 overflow-hidden">
@@ -482,7 +482,6 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-
 
         {/* Activity & Tryout Info */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">

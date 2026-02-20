@@ -1,4 +1,4 @@
-// client/lib/api.ts
+// client/lib/api.ts - REFACTORED VERSION
 
 import { supabase } from './supabase';
 
@@ -48,20 +48,34 @@ class APICache {
     console.log(`💾 Cache SET for key: ${key}`);
   }
 
+  // ✅ CRITICAL: Global cache invalidation
   clear(): void {
+    const size = this.cache.size;
     this.cache.clear();
-    console.log('🧹 Cache cleared');
+    console.log(`🧹 Cache cleared (${size} entries removed)`);
   }
 
   clearKey(key: string): void {
     this.cache.delete(key);
     console.log(`🧹 Cache cleared for key: ${key}`);
   }
+
+  // ✅ NEW: Clear specific patterns (useful for invalidating related data)
+  clearPattern(pattern: string): void {
+    let cleared = 0;
+    for (const key of this.cache.keys()) {
+      if (key.includes(pattern)) {
+        this.cache.delete(key);
+        cleared++;
+      }
+    }
+    console.log(`🧹 Cache pattern cleared: ${pattern} (${cleared} entries)`);
+  }
 }
 
 const apiCache = new APICache();
 
-// ✅ NEW: Helper untuk timeout
+// ✅ Helper untuk timeout
 async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number = 5000,
@@ -310,18 +324,17 @@ export const api = {
     });
   },
 
-  // ✅ NEW: Save Answer ke tabel baru 'student_answers' (IRT Optimized)
+  // ✅ NEW: Save Answer ke tabel 'student_responses' (IRT Optimized)
   saveAnswerIRT: async (body: {
     session_id: string;
-    question_id: number; // Backend uses bigint/number
+    question_id: string;
     selected_answer: string;
     is_correct: boolean;
-    question_difficulty: number;     // Snapshot difficulty
-    question_discrimination: number; // Snapshot discrimination
+    question_difficulty: number;
+    question_discrimination: number;
   }) => {
-    // Menggunakan direct Supabase client untuk UPSERT ke tabel student_answers
-    return supabase.from('student_answers').upsert(body, { 
-      onConflict: 'session_id,question_id' 
+    return supabase.from('student_responses').upsert(body, { 
+      onConflict: 'session_id,question_id'
     });
   },
 
@@ -344,9 +357,16 @@ export const api = {
   },
 
   submitTryout: async (sessionId: string) => {
-    return apiCall(`/sessions/${sessionId}/submit`, {
+    // ✅ Clear cache setelah submit untuk memastikan data fresh
+    const result = await apiCall(`/sessions/${sessionId}/submit`, {
       method: 'POST',
     });
+    
+    // Invalidate cache setelah submit sukses
+    apiCache.clear();
+    console.log('🧹 Cache cleared after tryout submission');
+    
+    return result;
   },
 
   /**
@@ -370,8 +390,25 @@ export const api = {
     });
 
     if (error) {
+      // ✅ Ekstrak pesan error sebenarnya dari response body Edge Function
+      let detailMessage = error.message || 'Unknown error';
+      try {
+        const context = (error as any).context;
+        if (context) {
+          const text = await context.text?.();
+          if (text) {
+            const parsed = JSON.parse(text);
+            detailMessage = parsed.error || parsed.message || text;
+          }
+        }
+      } catch {
+        // abaikan parse error, gunakan message asli
+      }
       console.error('❌ Edge Function Error:', error);
-      throw new Error(error.message || 'Gagal menghitung nilai via server');
+      console.error('❌ Detail dari server:', detailMessage);
+      console.error('❌ Session ID:', sessionId);
+      console.error('👉 Cek: Supabase Dashboard → Edge Functions → calculate-irt → Logs');
+      throw new Error(`IRT calculation failed: ${detailMessage}`);
     }
 
     console.log('✅ Server Result:', data);
@@ -531,11 +568,16 @@ export const api = {
     }, 10000);
   },
 
+  // ✅ CRITICAL: Export cache methods untuk akses eksternal
   clearCache: () => {
     apiCache.clear();
   },
 
   clearCacheKey: (key: string) => {
     apiCache.clearKey(key);
+  },
+
+  clearCachePattern: (pattern: string) => {
+    apiCache.clearPattern(pattern);
   },
 };

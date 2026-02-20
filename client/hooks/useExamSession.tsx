@@ -1,23 +1,24 @@
-// client/hooks/useExamSession.tsx
+// client/hooks/useExamSession.tsx - REFACTORED VERSION
+// ✅ Implementasi Atomic Submission Logic dengan Cache Invalidation
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
-import { supabase } from '@/lib/supabase'; // Import supabase client
-import toast from 'react-hot-toast'; // Import toast untuk notifikasi error
+import { supabase } from '@/lib/supabase';
+import toast from 'react-hot-toast';
 
 interface Question {
-  id: string; // Backend menggunakan BigInt, tapi di frontend biasanya string/number
+  id: string;
   soal_text: string;
-  opsi_a: string;       
-  opsi_b: string;       
-  opsi_c: string;       
+  opsi_a: string;
+  opsi_b: string;
+  opsi_c: string;
   opsi_d: string;
   urutan: number;
   jawaban_benar: string;
   image_url?: string | null;
-  difficulty?: number;      // ✅ IRT Parameter (b)
-  discrimination?: number;  // ✅ IRT Parameter (a) - Tambahan baru
+  difficulty?: number;
+  discrimination?: number;
 }
 
 export function useExamSession(sessionId: string, kategoriId?: string) {
@@ -30,8 +31,13 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [tryoutId, setTryoutId] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  // ✅ FIX #2: Ref sebagai guard utama — tidak masuk dependency array useCallback.
+  // Jika isSubmitting (state) dipakai di deps, submitExamLogic dibuat ulang saat submission
+  // dimulai → handleAutoSubmit ikut dibuat ulang → timer effect restart → timer loncat detik.
+  const isSubmittingRef = useRef(false);
 
-  // 1. Update Timer (Periodic Sync)
+  // ✅ 1. Update Timer (Periodic Sync)
   const updateTimer = useCallback(async (time: number) => {
     try {
       if (time % 10 === 0) console.log('⏱️ Updating timer:', time);
@@ -41,36 +47,122 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
     }
   }, [sessionId]);
 
-  // 2. Auto Submit (Saat Waktu Habis)
-  const handleAutoSubmit = useCallback(async () => {
-    try {
-      console.log('⏰ Time expired. Auto-submitting...');
-      // Panggil fungsi submit yang sama dengan tombol manual
-      await submitExamLogic(); 
-    } catch (error) {
-      console.error('❌ Error auto-submitting:', error);
+  // ✅ 2. ATOMIC SUBMISSION LOGIC (Server-Side dengan Cache Invalidation)
+  const submitExamLogic = useCallback(async () => {
+    // ✅ FIX #2: Guard pakai ref bukan state, agar tidak menyebabkan deps berubah
+    if (isSubmittingRef.current) {
+      console.log('⚠️ Submission already in progress, skipping...');
+      return;
     }
+
+    try {
+      isSubmittingRef.current = true; // ← set ref SEBELUM set state
+      setIsSubmitting(true);
+      setIsSaving(true);
+      
+      console.log('📤 Starting atomic submission process...');
+
+      // STEP 1: Update status ke 'completed' di database
+      console.log('1️⃣ Updating session status to completed...');
+      const { error: updateError } = await supabase
+        .from('tryout_sessions')
+        .update({ 
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', sessionId);
+
+      if (updateError) {
+        console.error('❌ Error updating session status:', updateError);
+        throw updateError;
+      }
+      console.log('✅ Session status updated to completed');
+
+      // STEP 2: Hitung skor IRT via server-side Edge Function
+      // ✅ FIX: IRT calculation bersifat non-blocking.
+      // Jika Edge Function return 400/500, submission TETAP berhasil dan
+      // user tetap diarahkan ke result. Cek Supabase Edge Function Logs
+      // untuk root cause error IRT yang sebenarnya.
+      console.log('2️⃣ Calculating IRT score on server...');
+      try {
+        await api.calculateIRTScoreServer(sessionId);
+        console.log('✅ IRT score calculated successfully');
+      } catch (irtError: any) {
+        console.error('⚠️ IRT calculation failed (non-fatal):', irtError?.message);
+        console.warn('⚠️ Cek Supabase Dashboard → Edge Functions → calculate-irt → Logs');
+        // Tidak throw — submission tetap lanjut
+      }
+
+      // STEP 3: CRITICAL - Clear global cache untuk memastikan data segar
+      console.log('3️⃣ Clearing global cache...');
+      api.clearCache();
+      console.log('✅ Global cache cleared - Dashboard & TryoutList will be fresh');
+
+      toast.success('Ujian berhasil dikumpulkan!');
+
+      // STEP 4: Navigate dengan { replace: true } untuk membersihkan navigation stack
+      console.log('4️⃣ Navigating to result page...');
+      navigate(`/tryout/${tryoutId}/result?session=${sessionId}`, { 
+        replace: true // ✅ CRITICAL: Prevent back navigation to exam page
+      });
+      
+    } catch (error: any) {
+      console.error('❌ Error submitting exam:', error);
+      toast.error(error.message || 'Gagal mengumpulkan jawaban. Silakan coba lagi.');
+      
+      // Rollback status jika gagal
+      try {
+        await supabase
+          .from('tryout_sessions')
+          .update({ status: 'in_progress' })
+          .eq('id', sessionId);
+        console.log('↩️ Session status rolled back to in_progress');
+      } catch (rollbackError) {
+        console.error('❌ Error rolling back status:', rollbackError);
+      }
+    } finally {
+      isSubmittingRef.current = false; // ← selalu reset ref
+      setIsSaving(false);
+      setIsSubmitting(false);
+    }
+  // ✅ FIX #2: isSubmitting TIDAK ada di deps — guard pakai ref, bukan state
   }, [sessionId, tryoutId, navigate]);
 
+  // ✅ 3. Auto Submit Handler (Saat Waktu Habis)
+  const handleAutoSubmit = useCallback(async () => {
+    console.log('⏰ Time expired. Auto-submitting...');
+    await submitExamLogic();
+  }, [submitExamLogic]);
+
+  // ✅ 4. Timer Effect dengan Auto-Submit
   useEffect(() => {
-    if (timeRemaining > 0 && !isLoading) {
+    if (timeRemaining > 0 && !isLoading && !isSubmitting) {
       const timer = setInterval(() => {
         setTimeRemaining(prev => {
           const newTime = prev - 1;
-          if (newTime % 30 === 0) updateTimer(newTime);
+          
+          // Update timer setiap 30 detik
+          if (newTime % 30 === 0) {
+            updateTimer(newTime);
+          }
+          
+          // Auto-submit saat waktu habis
           if (newTime <= 0) {
             handleAutoSubmit();
             return 0;
           }
+          
           return newTime;
         });
       }, 1000);
+
       return () => clearInterval(timer);
     }
-  }, [timeRemaining, isLoading, updateTimer, handleAutoSubmit]);
+  }, [timeRemaining, isLoading, isSubmitting, updateTimer, handleAutoSubmit]);
 
-  // 3. Fetch Data Awal
-  const fetchSessionData = async () => {
+  // ✅ 5. Fetch Session Data
+  const fetchSessionData = useCallback(async () => {
     try {
       setIsLoading(true);
       console.log('🔍 Fetching session data for:', sessionId);
@@ -80,6 +172,16 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
 
       if (!sessionData) throw new Error('Session data not found');
 
+      // Validasi status sesi
+      if (sessionData.status === 'completed') {
+        console.log('⚠️ Session already completed, redirecting...');
+        toast.error('Ujian ini sudah selesai.');
+        navigate(`/tryout/${sessionData.tryout_id}/result?session=${sessionId}`, { 
+          replace: true 
+        });
+        return;
+      }
+
       setTryoutId(sessionData.tryout_id);
       setTimeRemaining(sessionData.time_remaining || 0);
 
@@ -87,7 +189,6 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
       const questionData = questionsResponse?.questions || questionsResponse;
 
       if (Array.isArray(questionData)) {
-        // ✅ Mapping Data Soal (termasuk IRT params)
         const questionsWithData = questionData.map((q: any) => ({
           id: q.id,
           soal_text: q.soal_text,
@@ -98,8 +199,8 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
           urutan: q.urutan,
           jawaban_benar: q.jawaban_benar,
           image_url: q.image_url || null,
-          difficulty: q.difficulty || 0,          // Default 0
-          discrimination: q.discrimination || 1.0 // Default 1.0 (Standard Rasch/2PL)
+          difficulty: q.difficulty || 0,
+          discrimination: q.discrimination || 1.0
         }));
 
         setQuestions(questionsWithData);
@@ -118,20 +219,21 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [sessionId, navigate]);
 
   useEffect(() => {
-    if (sessionId) fetchSessionData();
-  }, [sessionId]);
+    if (sessionId) {
+      fetchSessionData();
+    }
+  }, [sessionId, fetchSessionData]);
 
-  // 4. Save Answer (Logic Baru untuk IRT)
-  const saveAnswer = async (questionId: string, answer: string) => {
+  // ✅ 6. Save Answer (IRT Optimized)
+  const saveAnswer = useCallback(async (questionId: string, answer: string) => {
     try {
       // Optimistic Update UI
       setAnswers(prev => ({ ...prev, [questionId]: answer }));
       setIsSaving(true);
 
-      // Cari data soal untuk dapat parameter IRT
       const currentQuestion = questions.find(q => String(q.id) === String(questionId));
       
       if (!currentQuestion) {
@@ -141,15 +243,17 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
 
       const isCorrect = answer === currentQuestion.jawaban_benar;
 
-      // ✅ Simpan ke tabel 'student_answers' via API baru
+      // Save ke tabel 'student_responses' via API
       await api.saveAnswerIRT({
         session_id: sessionId,
-        question_id: Number(questionId), // Konversi ke number (backend bigint)
+        question_id: questionId,
         selected_answer: answer,
         is_correct: isCorrect,
         question_difficulty: currentQuestion.difficulty || 0,
         question_discrimination: currentQuestion.discrimination || 1.0,
       });
+
+      console.log(`✅ Progress tersimpan: Soal ${questionId} = ${answer}`);
 
     } catch (error) {
       console.error('❌ Error saving answer:', error);
@@ -164,51 +268,23 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [sessionId, questions]);
 
-  // 5. Save Bookmarks
-  const saveBookmarks = async (bookmarks: number[]) => {
+  // ✅ 7. Save Bookmarks
+  const saveBookmarks = useCallback(async (bookmarks: number[]) => {
     try {
       setBookmarkedQuestions(bookmarks);
       await api.saveBookmarks(sessionId, bookmarks);
+      console.log('✅ Bookmarks saved:', bookmarks);
     } catch (error) {
       console.error('❌ Error saving bookmarks:', error);
     }
-  };
+  }, [sessionId]);
 
-  // 6. Submit Exam Logic (Server-Side Trigger)
-  const submitExamLogic = async () => {
-    try {
-      console.log('📤 Submitting exam to server...');
-      
-      // A. Update status session jadi 'completed' (Syarat backend sebelum hitung nilai)
-      const { error: updateError } = await supabase
-        .from('tryout_sessions')
-        .update({ status: 'completed' })
-        .eq('id', sessionId);
-
-      if (updateError) throw updateError;
-
-      // B. 🔥 Panggil Edge Function untuk menghitung nilai (Server-Side Scoring)
-      console.log('🧮 Triggering server calculation...');
-      await api.calculateIRTScoreServer(sessionId);
-      
-      console.log('✅ Exam submitted & scored successfully');
-      
-      // C. Redirect ke halaman hasil
-      navigate(`/tryout/${tryoutId}/result?session=${sessionId}`);
-      
-    } catch (error: any) {
-      console.error('❌ Error submitting exam:', error);
-      toast.error(`Gagal mengirim jawaban: ${error.message || 'Server error'}`);
-      throw error;
-    }
-  };
-
-  // Wrapper function untuk dipanggil dari UI
-  const submitExam = async () => {
+  // ✅ 8. Public Submit Function (Wrapper)
+  const submitExam = useCallback(async () => {
     await submitExamLogic();
-  };
+  }, [submitExamLogic]);
 
   return {
     questions,
@@ -221,6 +297,7 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
     timeRemaining,
     tryoutId,
     isSaving,
+    isSubmitting,
     bookmarkedQuestions,
     saveBookmarks
   };

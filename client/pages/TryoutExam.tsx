@@ -1,3 +1,6 @@
+// client/pages/TryoutExam.tsx - REFACTORED VERSION
+// ✅ Implementasi Server-Side Session Guard untuk mencegah akses ke completed exam
+
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Flag } from 'lucide-react';
@@ -19,8 +22,9 @@ export default function TryoutExam() {
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isVerifying, setIsVerifying] = useState(true); // ✅ NEW: Loading state untuk verifikasi
 
-  // ✅ Get hook data
+  // Get hook data
   const {
     questions,
     currentIndex,
@@ -32,32 +36,62 @@ export default function TryoutExam() {
     timeRemaining,
     tryoutId: examTryoutId,
     isSaving,
+    isSubmitting,
     bookmarkedQuestions,
     saveBookmarks
   } = useExamSession(sessionId || '', kategoriId || undefined);
 
+  // ✅ CRITICAL: Server-Side Session Guard (Navigation Protection)
   useEffect(() => {
-    const checkSubtestCompletion = async () => {
-      if (!sessionId || !currentUser?.user_id) return;
-      
+    const verifySessionAccess = async () => {
+      if (!sessionId || !tryoutId) {
+        console.log('⚠️ Missing sessionId or tryoutId');
+        toast.error('Session tidak valid');
+        navigate(`/tryout/${tryoutId}/start`, { replace: true });
+        return;
+      }
+
       try {
-        const { data: session } = await supabase
+        setIsVerifying(true);
+        console.log('🔍 Verifying session access for:', sessionId);
+
+        // Query langsung ke Supabase untuk cek status sesi
+        const { data: session, error } = await supabase
           .from('tryout_sessions')
-          .select('status')
+          .select('status, tryout_id')
           .eq('id', sessionId)
           .single();
-        
-        if (session?.status === 'completed') {
-          toast.error('Subtest ini sudah selesai. Anda tidak dapat mengerjakannya lagi.');
-          navigate(`/tryout/${tryoutId}/start`);
+
+        if (error) {
+          console.error('❌ Error verifying session:', error);
+          toast.error('Session tidak ditemukan');
+          navigate(`/tryout/${tryoutId}/start`, { replace: true });
+          return;
         }
+
+        // ✅ CRITICAL CHECK: Jika status sudah 'completed', redirect paksa ke result
+        if (session.status === 'completed') {
+          console.log('⚠️ Session already completed, redirecting to result...');
+          toast.error('Ujian ini sudah selesai.');
+          navigate(`/tryout/${tryoutId}/result?session=${sessionId}`, { 
+            replace: true // ✅ Prevent back navigation
+          });
+          return;
+        }
+
+        // ✅ Session valid dan masih in_progress
+        console.log('✅ Session verified, status:', session.status);
+        setIsVerifying(false);
+
       } catch (err) {
-        console.error('Error checking subtest status:', err);
+        console.error('❌ Error in session verification:', err);
+        toast.error('Terjadi kesalahan saat memuat ujian');
+        navigate(`/tryout/${tryoutId}/start`, { replace: true });
       }
     };
-    
-    checkSubtestCompletion();
-  }, [sessionId, currentUser, navigate, tryoutId]);
+
+    verifySessionAccess();
+  }, [sessionId, tryoutId, navigate]);
 
   // ✅ Fetch current user
   useEffect(() => {
@@ -70,7 +104,7 @@ export default function TryoutExam() {
       if (session) {
         const { data: userData } = await supabase
           .from('users')
-          .select('nama_lengkap, username, photo_profile')
+          .select('nama_lengkap, username, photo_profile, user_id')
           .eq('auth_id', session.user.id)
           .single();
         setCurrentUser(userData);
@@ -80,55 +114,18 @@ export default function TryoutExam() {
     }
   };
 
-  // Redirect if no session
+  // ✅ Prevent accidental page close
   useEffect(() => {
-    if (!sessionId) {
-      toast.error('Session tidak valid');
-      navigate(`/tryout/${tryoutId}/start`);
-    }
-  }, [sessionId, navigate, tryoutId]);
-
-  // Auto-submit when time is up
-  useEffect(() => {
-    if (timeRemaining === 0 && questions.length > 0) {
-      handleAutoSubmit();
-    }
-  }, [timeRemaining, questions.length]);
-
-  const handleAutoSubmit = async () => {
-    toast.error('Waktu habis! Tryout akan disubmit otomatis.');
-    try {
-      await submitExam();
-      navigate(`/tryout/${tryoutId}/result?session=${sessionId}`);
-    } catch (err) {
-      console.error('Auto submit error:', err);
-    }
-  };
-
-  const handleFinishSubtest = async () => {
-    try {
-      if (bookmarkedQuestions.length > 0) {
-        await saveBookmarks(bookmarkedQuestions);
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isSubmitting) {
+        e.preventDefault();
+        e.returnValue = '';
       }
-      
-      await supabase
-        .from('tryout_sessions')
-        .update({
-          status: 'completed',
-          time_remaining: timeRemaining,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', sessionId);
+    };
 
-      toast.success('Subtest selesai! Progress tersimpan');
-      
-      navigate(`/tryout/${tryoutId}/start`);
-      
-    } catch (err) {
-      console.error('Error finishing subtest:', err);
-      toast.error('Gagal menyimpan progress');
-    }
-  };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isSubmitting]);
 
   const handleAnswerSelect = (answer: string) => {
     if (!currentQuestion) {
@@ -137,7 +134,6 @@ export default function TryoutExam() {
     }
 
     console.log('✅ Answer selected:', answer, 'for question ID:', currentQuestion.id);
-    
     saveAnswer(currentQuestion.id, answer);
   };
 
@@ -209,17 +205,6 @@ export default function TryoutExam() {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [currentIndex, questions.length, setCurrentIndex]);
 
-  // Prevent accidental page close
-  useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, []);
-
   // Format time display
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -227,11 +212,24 @@ export default function TryoutExam() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Guard: Return null while redirecting
+  // ✅ Guard: Return null while redirecting (prevent flicker)
   if (!sessionId) {
     return null;
   }
 
+  // ✅ Show loading during verification (prevent showing exam content before verification)
+  if (isVerifying) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#295782] mx-auto"></div>
+          <p className="mt-4 text-gray-600">Memverifikasi akses...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ Loading state for questions
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -269,7 +267,8 @@ export default function TryoutExam() {
             {/* Tombol Keluar */}
             <button
               onClick={handleExit}
-              className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+              disabled={isSubmitting}
+              className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
             >
               <svg
                 className="w-5 h-5"
@@ -317,7 +316,6 @@ export default function TryoutExam() {
         <div className="flex flex-col lg:flex-row gap-5">
           {/* Main Question Area */}
           <div className="flex-1">
-            {/* ✅ CRITICAL FIX: Passing props yang PERSIS sesuai dengan QuestionDisplay interface */}
             <QuestionDisplay
               question={currentQuestion}
               selectedAnswer={answers[currentQuestion.id]}
@@ -331,7 +329,8 @@ export default function TryoutExam() {
               {currentIndex > 0 && (
                 <button
                   onClick={handlePrevious}
-                  className="rounded-xl border-2 border-[#4A90E2] text-[#4A90E2] hover:bg-blue-50 px-6 py-2.5 font-medium transition-colors flex items-center justify-center gap-2"
+                  disabled={isSubmitting}
+                  className="rounded-xl border-2 border-[#4A90E2] text-[#4A90E2] hover:bg-blue-50 px-6 py-2.5 font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <svg
                     className="w-4 h-4"
@@ -357,7 +356,8 @@ export default function TryoutExam() {
               {currentIndex < questions.length - 1 ? (
                 <button
                   onClick={handleNext}
-                  className="rounded-xl bg-[#295782] hover:bg-[#1e3f5f] text-white px-8 py-2.5 font-medium transition-colors flex items-center justify-center gap-2"
+                  disabled={isSubmitting}
+                  className="rounded-xl bg-[#295782] hover:bg-[#1e3f5f] text-white px-8 py-2.5 font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <span>Selanjutnya</span>
                   <svg
@@ -377,9 +377,10 @@ export default function TryoutExam() {
               ) : (
                 <button
                   onClick={() => setShowSubmitConfirm(true)}
-                  className="rounded-xl bg-[#00A63E] hover:bg-[#009038] text-white px-10 py-2.5 font-medium shadow-md transition-colors"
+                  disabled={isSubmitting}
+                  className="rounded-xl bg-[#00A63E] hover:bg-[#009038] text-white px-10 py-2.5 font-medium shadow-md transition-colors disabled:opacity-50"
                 >
-                  Selesai
+                  {isSubmitting ? 'Mengumpulkan...' : 'Selesai'}
                 </button>
               )}
             </div>
@@ -391,7 +392,8 @@ export default function TryoutExam() {
               {/* Bookmark Button */}
               <button
                 onClick={handleToggleBookmark}
-                className={`w-full mb-6 px-4 py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2 font-medium ${
+                disabled={isSubmitting}
+                className={`w-full mb-6 px-4 py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2 font-medium disabled:opacity-50 ${
                   bookmarkedQuestions.includes(currentIndex)
                     ? 'bg-red-600 hover:bg-red-700 text-white'
                     : 'bg-gray-700 hover:bg-gray-800 text-white'
@@ -421,7 +423,8 @@ export default function TryoutExam() {
                     <button
                       key={question.id}
                       onClick={() => setCurrentIndex(index)}
-                      className={`aspect-square rounded-lg font-bold text-sm transition-all ${
+                      disabled={isSubmitting}
+                      className={`aspect-square rounded-lg font-bold text-sm transition-all disabled:opacity-50 ${
                         isCurrent ? 'ring-2 ring-[#295782] ring-offset-2' : ''
                       } ${
                         isBookmarked
@@ -457,14 +460,14 @@ export default function TryoutExam() {
       {/* Submit Confirmation Modal */}
       {showSubmitConfirm && (
         <>
-          <div className="fixed inset-0 bg-black/50 z-50" onClick={() => setShowSubmitConfirm(false)} />
+          <div className="fixed inset-0 bg-black/50 z-50" onClick={() => !isSubmitting && setShowSubmitConfirm(false)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
               <h3 className="text-xl font-bold text-gray-900 mb-3">
-                Selesai Subtest Ini?
+                Kumpulkan Jawaban?
               </h3>
               <p className="text-gray-600 mb-4">
-                Progress Anda akan disimpan. Anda dapat melanjutkan subtest lain atau melihat hasil akhir dari halaman Start.
+                Jawaban Anda akan dikumpulkan dan nilai akan dihitung. Setelah dikumpulkan, Anda akan diarahkan ke halaman hasil.
               </p>
               <p className="text-sm text-gray-500 mb-6">
                 ⚠️ Soal terjawab: {Object.keys(answers).length}/{questions.length}
@@ -472,21 +475,24 @@ export default function TryoutExam() {
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowSubmitConfirm(false)}
-                  className="flex-1 px-4 py-2.5 border-2 border-gray-300 rounded-xl hover:bg-gray-50 font-medium transition-colors"
+                  disabled={isSubmitting}
+                  className="flex-1 px-4 py-2.5 border-2 border-gray-300 rounded-xl hover:bg-gray-50 font-medium transition-colors disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
-                  onClick={handleFinishSubtest}
-                  className="flex-1 px-4 py-2.5 bg-[#00A63E] text-white rounded-xl hover:bg-[#009038] font-medium transition-colors"
+                  onClick={submitExam}
+                  disabled={isSubmitting}
+                  className="flex-1 px-4 py-2.5 bg-[#00A63E] text-white rounded-xl hover:bg-[#009038] font-medium transition-colors disabled:opacity-50"
                 >
-                  Ya, Selesai
+                  {isSubmitting ? 'Mengumpulkan...' : 'Ya, Kumpulkan'}
                 </button>
               </div>
             </div>
           </div>
         </>
       )}
+
       {/* Question Sidebar Modal (Mobile) */}
       <QuestionSidebar
         show={showSidebar}
