@@ -18,6 +18,9 @@ interface TryoutState {
     name: string;
     tanggal: string;
     durasi: string;
+    open_date?: string;
+    close_date?: string;
+    is_result_published?: boolean;
   };
   isInfoAdded: boolean;
   questionsByCategory: {

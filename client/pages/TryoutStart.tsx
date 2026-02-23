@@ -1,9 +1,6 @@
-// client/pages/TryoutStart.tsx - REFACTORED VERSION
-// ✅ Implementasi Conditional UI State dan Auto-Refresh pada Window Focus
-
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Play, Clock, FileText, Calendar, CheckCircle, Eye } from 'lucide-react';
+import { ArrowLeft, Play, Clock, FileText, Calendar, CheckCircle, Eye, Lock } from 'lucide-react';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import toast from 'react-hot-toast';
@@ -20,6 +17,10 @@ export default function TryoutStart() {
   
   const [showTargetModal, setShowTargetModal] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
+  const [globalProgress, setGlobalProgress] = useState<any>(null);
+
+  // STATE UNTUK TIMER
+  const [now, setNow] = useState(new Date());
   
   const {
     tryout,
@@ -31,39 +32,36 @@ export default function TryoutStart() {
     refreshData
   } = useTryoutData(tryoutId!);
 
-  // ✅ Auto-refresh data saat window mendapat fokus kembali
+  // Timer berdetak setiap detik
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Auto-refresh data saat window mendapat fokus kembali
   useEffect(() => {
     const handleWindowFocus = () => {
-      console.log('🔄 Window focused, refreshing data...');
       refreshData();
     };
-
     window.addEventListener('focus', handleWindowFocus);
     return () => window.removeEventListener('focus', handleWindowFocus);
   }, [refreshData]);
 
-  // ✅ FIX #3: Gunakan ref agar interval hanya dibuat SEKALI.
-  // Sebelumnya: deps [isLoading, tryout, refreshData] menyebabkan interval di-reset setiap kali
-  // refreshData dipanggil (isLoading jadi true → false → effect re-run → timer mulai dari nol lagi).
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const refreshDataRef = useRef(refreshData);
 
-  // Selalu sinkronkan ref ke fungsi refreshData terbaru tanpa memicu re-run effect
   useEffect(() => {
     refreshDataRef.current = refreshData;
   }, [refreshData]);
 
-  // Setup interval hanya sekali saat mount, cleanup saat unmount
   useEffect(() => {
     intervalRef.current = setInterval(() => {
-      console.log('🔄 Auto-refreshing data (30s interval)...');
       refreshDataRef.current();
     }, 30000);
-
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, []); // ← deps kosong, interval tidak pernah di-reset
+  }, []);
 
   useEffect(() => {
     if (!isLoading && !targetInfo) {
@@ -72,10 +70,24 @@ export default function TryoutStart() {
   }, [isLoading, targetInfo]);
 
   useEffect(() => {
-    if (!isLoading && tryout) {
-      refreshData();
+    if (tryoutId) {
+      api.getUserProgress(tryoutId)
+        .then(res => setGlobalProgress(res))
+        .catch(() => console.log("Progress not found"));
     }
-  }, []);
+  }, [tryoutId]);
+
+  // HELPER UNTUK COUNTDOWN PADA TOMBOL
+  const formatCountdown = (targetDate: Date) => {
+    const diff = targetDate.getTime() - now.getTime();
+    if (diff <= 0) return null;
+    
+    const h = Math.floor(diff / (1000 * 60 * 60));
+    const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const s = Math.floor((diff % (1000 * 60)) / 1000);
+    
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
 
   const handleStartTryout = async (kategoriKode?: string) => {
     if (!targetInfo) {
@@ -87,10 +99,7 @@ export default function TryoutStart() {
     try {
       setIsStarting(true);
       
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      // Cari session terakhir yang statusnya in_progress/purchased
-      const { data: existingSession, error: sessionError } = await supabase
+      const { data: existingSession } = await supabase
         .from('tryout_sessions')
         .select('id, status')
         .eq('tryout_id', tryoutId)
@@ -103,22 +112,12 @@ export default function TryoutStart() {
       let sessionId = existingSession?.id;
 
       if (sessionId) {
-        console.log('✅ Menggunakan session yang sudah dibeli:', sessionId);
-        
-        // Update target kampus & jurusan ke session tersebut
-        const { error: updateError } = await supabase
-            .from('tryout_sessions')
-            .update({
-                target_kampus: targetInfo.kampusName,
-                target_jurusan: targetInfo.prodiName,
-                status: 'in_progress' 
-            })
-            .eq('id', sessionId);
-            
-        if (updateError) throw updateError;
-        
+        await supabase.from('tryout_sessions').update({
+            target_kampus: targetInfo.kampusName,
+            target_jurusan: targetInfo.prodiName,
+            status: 'in_progress' 
+        }).eq('id', sessionId);
       } else {
-        console.log('⚠️ Session belum ada, membuat baru...');
         const sessionResponse = await api.createSession({
             tryout_id: tryoutId!,
             kategori_id: kategoriKode,
@@ -130,7 +129,6 @@ export default function TryoutStart() {
 
       if (!sessionId) throw new Error('Gagal mendapatkan Session ID');
 
-      // Navigasi ke Ujian
       const params = new URLSearchParams();
       params.set('session', sessionId);
       if (kategoriKode) params.set('kategori', kategoriKode);
@@ -138,106 +136,44 @@ export default function TryoutStart() {
       navigate(`/tryout/${tryoutId}/exam?${params.toString()}`);
 
     } catch (err: any) {
-      console.error('❌ Error starting tryout:', err);
       toast.error(err.message || 'Gagal memulai tryout');
     } finally {
       setIsStarting(false);
     }
   };
 
-  // ✅ Handler untuk melihat hasil (jika sudah completed)
-  const handleViewResult = async () => {
-    try {
-      setIsStarting(true);
-      
-      // Ambil session yang sudah completed
-      const { data: sessions, error } = await supabase
-        .from('tryout_sessions')
-        .select('id')
-        .eq('tryout_id', tryoutId)
-        .eq('user_id', currentUser?.user_id)
-        .eq('status', 'completed')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (error || !sessions?.id) {
-        throw new Error('Session hasil tidak ditemukan');
-      }
-
-      // Navigate ke result page
-      navigate(`/tryout/${tryoutId}/result?session=${sessions.id}`);
-      
-    } catch (err: any) {
-      console.error('❌ Error viewing result:', err);
-      toast.error(err.message || 'Gagal membuka hasil');
-    } finally {
-      setIsStarting(false);
-    }
+  const handleViewResult = () => {
+    const sessionId = globalProgress?.session_id;
+    if (sessionId) navigate(`/tryout/${tryoutId}/result?session=${sessionId}`);
   };
 
-  // ✅ Handler untuk lanjutkan tryout (jika masih in_progress)
-  const handleContinueTryout = async () => {
-    try {
-      setIsStarting(true);
-      
-      // Ambil session yang masih in_progress
-      const { data: sessions, error } = await supabase
-        .from('tryout_sessions')
-        .select('id')
-        .eq('tryout_id', tryoutId)
-        .eq('user_id', currentUser?.user_id)
-        .eq('status', 'in_progress')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (error || !sessions?.id) {
-        throw new Error('Session tidak ditemukan');
-      }
-
-      // Navigate ke exam page
-      const params = new URLSearchParams();
-      params.set('session', sessions.id);
-      navigate(`/tryout/${tryoutId}/exam?${params.toString()}`);
-      
-    } catch (err: any) {
-      console.error('❌ Error continuing tryout:', err);
-      toast.error(err.message || 'Gagal melanjutkan tryout');
-    } finally {
-      setIsStarting(false);
-    }
-  };
-
-  // ✅ CRITICAL: Determine button state berdasarkan progress
   const getButtonState = () => {
+    // 1. CEK JADWAL & SCORING DULU
+    const openDate = tryout?.open_date ? new Date(tryout.open_date) : null;
+    const closeDate = tryout?.close_date ? new Date(tryout.close_date) : null;
+    const overallStatus = globalProgress?.status || 'not_started';
+    const isScoring = overallStatus === 'completed' && !tryout?.is_result_published;
+
+    if (isScoring) {
+      return { type: 'locked', label: 'Sedang Dinilai...', icon: <Clock className="w-5 h-5" />, disabled: true, gradient: 'from-orange-400 to-orange-500' };
+    }
+    if (overallStatus === 'completed') {
+      return { type: 'view_result', label: 'Lihat Hasil', icon: <Eye className="w-5 h-5" />, action: handleViewResult, gradient: 'from-green-500 to-emerald-600' };
+    }
+
+    if (openDate && now < openDate) {
+      return { type: 'locked', label: `Buka dalam: ${formatCountdown(openDate)}`, icon: <Lock className="w-5 h-5" />, disabled: true, gradient: 'from-gray-400 to-gray-500' };
+    }
+    if (closeDate && now > closeDate && overallStatus === 'not_started') {
+      return { type: 'locked', label: 'Waktu Ditutup', icon: <Lock className="w-5 h-5" />, disabled: true, gradient: 'from-red-400 to-red-500' };
+    }
+
+    // 2. JIKA JADWAL AMAN, CEK PROGRESS NORMAL
     const progressValues = Object.values(progressData);
-    
-    // Cek apakah ada session yang in_progress
     const hasInProgress = progressValues.some(p => p.status === 'in_progress');
     
-    // Cek apakah semua subtest completed
-    const allCompleted = progressValues.length > 0 && 
-                        progressValues.every(p => p.status === 'completed');
-    
-    if (allCompleted) {
-      return {
-        type: 'view_result',
-        label: 'Lihat Hasil',
-        icon: <Eye className="w-5 h-5" />,
-        action: handleViewResult,
-        gradient: 'from-green-500 to-emerald-600'
-      };
-    }
-    
-    if (hasInProgress) {
-      return {
-        type: 'continue',
-        label: 'Lanjutkan Tryout',
-        icon: <Play className="w-5 h-5" />,
-        action: handleContinueTryout,
-        gradient: 'from-[#295782] to-[#1e4060]'
-      };
+    if (hasInProgress || overallStatus === 'in_progress') {
+      return { type: 'continue', label: 'Lanjutkan Tryout', icon: <Play className="w-5 h-5" />, action: () => handleStartTryout(), gradient: 'from-[#295782] to-[#1e4060]' };
     }
     
     return {
@@ -245,41 +181,28 @@ export default function TryoutStart() {
       label: 'Mulai Tryout',
       icon: <Play className="w-5 h-5" />,
       action: () => {
-        // Cari subtest pertama yang belum dikerjakan
         let firstIncompleteKategori: string | null = null;
-        
         const kelompokOrder = ['TPS', 'Literasi', 'Matematika', 'Sains', 'Sosial'];
-        
         for (const kelompok of kelompokOrder) {
           const kategorisInGroup = groupedKategoris[kelompok];
           if (!kategorisInGroup) continue;
-          
           const sortedKategoris = [...kategorisInGroup].sort((a, b) => a.urutan - b.urutan);
-          
           for (const kategori of sortedKategoris) {
             const progress = progressData[kategori.id];
-            
             if (!progress || progress.status !== 'completed') {
               firstIncompleteKategori = kategori.id;
               break;
             }
           }
-          
           if (firstIncompleteKategori) break;
         }
-        
-        if (firstIncompleteKategori) {
-          console.log('Starting first incomplete kategori:', firstIncompleteKategori);
-          handleStartTryout(firstIncompleteKategori);
-        }
+        if (firstIncompleteKategori) handleStartTryout(firstIncompleteKategori);
+        else handleStartTryout();
       },
       gradient: 'from-[#295782] to-[#1e4060]'
     };
   };
 
-  const buttonState = getButtonState();
-
-  // Loading state
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-[#e6f3ff] via-[#f8fbff] to-white flex items-center justify-center">
@@ -291,64 +214,35 @@ export default function TryoutStart() {
     );
   }
 
-  // Not found state
-  if (!tryout) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-[#e6f3ff] via-[#f8fbff] to-white flex items-center justify-center">
-        <div className="text-center max-w-md mx-auto px-6">
-          <div className="bg-white rounded-2xl shadow-lg p-8">
-            <p className="text-lg text-[#1d293d] font-semibold mb-4">Tryout tidak ditemukan</p>
-            <button
-              onClick={() => navigate('/tryout')}
-              className="px-6 py-3 bg-gradient-to-r from-[#295782] to-[#89b0c7] text-white rounded-xl font-semibold hover:shadow-lg transition-all"
-            >
-              Kembali ke Daftar Tryout
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  if (!tryout) return null;
 
-  // Main render
+  const buttonState = getButtonState();
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#e6f3ff] via-[#f8fbff] to-white">
-      <Header 
-        userName={currentUser?.username || currentUser?.nama_lengkap || 'User'}
-        userPhoto={currentUser?.photo_profile}
-      />
+      <Header userName={currentUser?.username || currentUser?.nama_lengkap || 'User'} userPhoto={currentUser?.photo_profile} />
 
       <div className="max-w-6xl mx-auto px-6 py-8">
-        {/* Back Button */}
-        <button
-          onClick={() => navigate('/tryout')}
-          className="flex items-center gap-2 text-[#62748e] hover:text-[#295782] mb-6 transition-colors"
-        >
+        <button onClick={() => navigate('/tryout')} className="flex items-center gap-2 text-[#62748e] hover:text-[#295782] mb-6 transition-colors">
           <ArrowLeft className="w-4 h-4" />
           <span className="text-sm font-medium">Kembali ke Daftar Tryout</span>
         </button>
 
-        {/* Title Section */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-[#1d293d] mb-2">{tryout.nama_tryout}</h1>
           <div className="flex items-center gap-4 text-sm text-[#62748e]">
             <span className="flex items-center gap-2">
               <Calendar className="w-4 h-4" />
-              {format(new Date(tryout.tanggal_ujian), 'd MMMM yyyy', { locale: idLocale })}
+              {tryout.open_date ? format(new Date(tryout.open_date), 'd MMM yyyy, HH:mm', { locale: idLocale }) : format(new Date(tryout.tanggal_ujian), 'd MMMM yyyy', { locale: idLocale })}
             </span>
             <span className="flex items-center gap-2">
               <Clock className="w-4 h-4" />
               {tryout.durasi_menit} menit
             </span>
-            <span className="flex items-center gap-2">
-              <FileText className="w-4 h-4" />
-              Total soal per subtest
-            </span>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Subtest List */}
           <div className="lg:col-span-2 space-y-6">
             <SubtestList
               groupedKategoris={groupedKategoris}
@@ -359,16 +253,12 @@ export default function TryoutStart() {
             />
           </div>
 
-          {/* Right Column - Info & Actions */}
           <div className="space-y-6">
-            {/* Target Info Card */}
+            {/* Target Card */}
             <div className="bg-white rounded-2xl shadow-sm p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-bold text-[#1d293d]">Target Kampus & Jurusan</h2>
-                <button
-                  onClick={() => setShowTargetModal(true)}
-                  className="text-xs text-[#295782] hover:underline font-medium"
-                >
+                <button onClick={() => setShowTargetModal(true)} className="text-xs text-[#295782] hover:underline font-medium">
                   {targetInfo ? 'Ubah' : 'Pilih'}
                 </button>
               </div>
@@ -386,15 +276,8 @@ export default function TryoutStart() {
                 </div>
               ) : (
                 <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 text-center">
-                  <p className="text-sm text-orange-600 font-medium mb-2">
-                    ⚠️ Belum memilih target
-                  </p>
-                  <button
-                    onClick={() => setShowTargetModal(true)}
-                    className="text-xs text-orange-600 hover:underline font-medium"
-                  >
-                    Klik untuk memilih →
-                  </button>
+                  <p className="text-sm text-orange-600 font-medium mb-2">⚠️ Belum memilih target</p>
+                  <button onClick={() => setShowTargetModal(true)} className="text-xs text-orange-600 hover:underline font-medium">Klik untuk memilih →</button>
                 </div>
               )}
             </div>
@@ -403,88 +286,37 @@ export default function TryoutStart() {
             <div className="bg-gradient-to-br from-[#295782] to-[#89b0c7] rounded-2xl shadow-lg p-6 text-white">
               <h3 className="text-lg font-bold mb-3">Informasi Penting</h3>
               <ul className="space-y-2 text-sm">
-                <li className="flex items-start gap-2">
-                  <span className="text-[#fbbf24]">✓</span>
-                  <span>Koneksi internet stabil</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-[#fbbf24]">✓</span>
-                  <span>Kerjakan dengan fokus</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-[#fbbf24]">✓</span>
-                  <span>Timer otomatis berjalan</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-[#fbbf24]">✓</span>
-                  <span>Jawaban tersimpan otomatis</span>
-                </li>
+                <li className="flex items-start gap-2"><span className="text-[#fbbf24]">✓</span><span>Koneksi internet stabil</span></li>
+                <li className="flex items-start gap-2"><span className="text-[#fbbf24]">✓</span><span>Kerjakan dengan fokus</span></li>
+                <li className="flex items-start gap-2"><span className="text-[#fbbf24]">✓</span><span>Timer otomatis berjalan</span></li>
               </ul>
             </div>
 
-            {/* ✅ CONDITIONAL ACTION BUTTON */}
+            {/* ACTION BUTTON DENGAN TIMER */}
             <button
               onClick={buttonState.action}
-              disabled={isStarting || (!targetInfo && buttonState.type === 'start')}
+              disabled={isStarting || buttonState.disabled || (!targetInfo && buttonState.type === 'start')}
               className={`w-full py-4 rounded-xl text-base font-bold shadow-lg transition-all flex items-center justify-center gap-2 ${
                 targetInfo || buttonState.type !== 'start'
-                  ? `bg-gradient-to-r ${buttonState.gradient} text-white hover:shadow-xl disabled:opacity-50`
+                  ? `bg-gradient-to-r ${buttonState.gradient} text-white hover:shadow-xl disabled:opacity-80`
                   : 'bg-gray-200 text-gray-400 cursor-not-allowed'
               }`}
             >
               {isStarting ? (
-                <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                  Memproses...
-                </>
+                <><div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> Memproses...</>
               ) : (
-                <>
-                  {buttonState.icon}
-                  {buttonState.label}
-                </>
+                <>{buttonState.icon} {buttonState.label}</>
               )}
             </button>
-
-            {/* Warning message */}
-            {!targetInfo && buttonState.type === 'start' && (
-              <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center">
-                <p className="text-xs text-orange-600 font-medium">
-                  ⚠️ Pilih kampus dan program studi terlebih dahulu
-                </p>
-              </div>
-            )}
-
-            {/* Status Info */}
-            {buttonState.type === 'view_result' && (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
-                <CheckCircle className="w-8 h-8 text-green-600 mx-auto mb-2" />
-                <p className="text-sm text-green-600 font-semibold">
-                  ✅ Semua subtest telah selesai!
-                </p>
-              </div>
-            )}
-
-            {buttonState.type === 'continue' && (
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
-                <Clock className="w-8 h-8 text-blue-600 mx-auto mb-2" />
-                <p className="text-sm text-blue-600 font-semibold">
-                  📝 Tryout sedang berlangsung
-                </p>
-              </div>
-            )}
           </div>
         </div>
       </div>
 
-      {/* Target Selection Modal */}
       <TargetSelectionModal
         show={showTargetModal}
         onClose={() => setShowTargetModal(false)}
         tryoutId={tryoutId!}
-        onSuccess={() => {
-          setShowTargetModal(false);
-          refreshData();
-        }}
+        onSuccess={() => { setShowTargetModal(false); refreshData(); }}
       />
     </div>
   );

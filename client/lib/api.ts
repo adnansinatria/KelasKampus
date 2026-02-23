@@ -512,6 +512,9 @@ export const api = {
   adminCreateTryout: async (body: {
     nama_tryout: string;
     tanggal_ujian: string;
+    open_date?: string;            // Tambahkan ini
+    close_date?: string;           // Tambahkan ini
+    is_result_published?: boolean; // Tambahkan ini
     kategori: string;
     durasi_menit: number;
     status: string;
