@@ -571,6 +571,13 @@ export const api = {
     }, 10000);
   },
 
+  adminBulkCreateUsers: async (users: any[]) => {
+    return apiCall('/bulk-create-users', {
+      method: 'POST',
+      body: JSON.stringify({ users }),
+    }, 60000); // Timeout diperpanjang jadi 60 detik karena proses massal
+  },
+
   // ✅ CRITICAL: Export cache methods untuk akses eksternal
   clearCache: () => {
     apiCache.clear();

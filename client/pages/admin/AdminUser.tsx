@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, ChevronDown, Eye, Edit2, Trash2 } from "lucide-react";
+import { Search, ChevronDown, Eye, Edit2, Trash2, Upload, Plus } from "lucide-react";
 import toast from "react-hot-toast";
 import AdminLayout from "@/components/admin/AdminLayout";
 import { supabase } from "@/lib/supabase";
 import UserViewModal from "@/components/admin/UserViewModal";
 import UserEditModal from "@/components/admin/UserEditModal";
+import BulkImportUsersModal from "@/components/admin/BulkImportUsersModal"; // Komponen baru
 
 interface User {
   user_id: string;
@@ -39,6 +40,7 @@ export default function AdminUser() {
   // Modal states
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false); // State untuk modal import CSV
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
   const fetchUsers = async () => {
@@ -98,7 +100,6 @@ export default function AdminUser() {
 
       // 3. Gabungkan data
       const transformedUsers: User[] = userData?.map((user: any) => {
-        // ... transform transactions sama seperti sebelumnya ...
         const successTransactions = user.transactions?.filter((t: any) => t.status === "success") || [];
         const totalTransaksi = successTransactions.length;
         
@@ -118,7 +119,7 @@ export default function AdminUser() {
           .map((t: any) => t.packages?.name)
           .filter((name: string) => name !== null && name !== undefined);
 
-        // ✅ GABUNGKAN dengan data siswa
+        // GABUNGKAN dengan data siswa
         const siswaInfo = siswaData?.find(s => s.user_id === user.user_id);
 
         return {
@@ -147,7 +148,6 @@ export default function AdminUser() {
       setIsLoading(false);
     }
   };
-
 
   // Delete user handler
   const handleDelete = async (userId: string, userName: string) => {
@@ -245,12 +245,24 @@ export default function AdminUser() {
   return (
     <AdminLayout>
       <div className="max-w-[1363px] mx-auto px-4 md:px-6 py-8">
-        {/* Page Title */}
-        <div className="mb-8">
-          <h1 className="text-2xl font-bold text-[#1E293B] mb-2">Manajemen Pengguna</h1>
-          <p className="text-sm text-[#64748B]">
-            Kelola akun pengguna, status, dan aktivitas mereka.
-          </p>
+        
+        {/* Page Title & Actions */}
+        <div className="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-[#1E293B] mb-2">Manajemen Pengguna</h1>
+            <p className="text-sm text-[#64748B]">
+              Kelola akun pengguna, status, dan aktivitas mereka.
+            </p>
+          </div>
+          
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setShowBulkImport(true)} 
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm"
+            >
+              <Upload className="w-4 h-4" /> Import Siswa (CSV)
+            </button>
+          </div>
         </div>
 
         {/* Filter & Search Card */}
@@ -474,7 +486,17 @@ export default function AdminUser() {
         </div>
       </div>
 
-      {/* Modals */}
+      {/* Modals Komponen Utama */}
+      <BulkImportUsersModal 
+        show={showBulkImport} 
+        onClose={() => setShowBulkImport(false)} 
+        onSuccess={() => {
+          setShowBulkImport(false);
+          fetchUsers(); // Auto refresh tabel setelah import
+        }} 
+      />
+
+      {/* Modals Edit & View */}
       {selectedUser && (
         <>
           <UserViewModal
