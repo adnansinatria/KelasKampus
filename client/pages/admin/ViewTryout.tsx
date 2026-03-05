@@ -5,7 +5,7 @@ import { ArrowLeft, FileText, CheckCircle2, Edit2, ChevronDown, Image as ImageIc
 import toast from "react-hot-toast";
 import { api } from "@/lib/api";
 import AdminLayout from "@/components/admin/AdminLayout";
-
+import ExportCSVButton from "@/components/admin/ExportCSVButton"; // ✅ IMPORT KOMPONEN EXPORT
 
 // ✅ Kategori struktur dengan GROUPING - TIDAK DIUBAH
 const CATEGORIES = [
@@ -36,7 +36,6 @@ const CATEGORIES = [
   },
 ];
 
-
 export default function ViewTryout() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -46,38 +45,30 @@ export default function ViewTryout() {
   const [error, setError] = useState<string | null>(null);
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
 
-
   // ✅ CHANGED: Fetch via API instead of supabase
   const fetchTryoutDetail = async () => {
     setIsLoading(true);
     setError(null);
 
-
     try {
       console.log("🔍 Fetching tryout detail via API:", id);
-
 
       // ✅ CHANGED: Use API to get tryout detail
       const tryoutResponse = await api.adminGetTryoutDetail(id!);
       const tryoutData = tryoutResponse?.data || tryoutResponse;
 
-
       console.log("📊 Tryout data:", tryoutData);
       setTryout(tryoutData);
-
 
       // ✅ CHANGED: Use API to get questions
       const questionsResponse = await api.adminGetTryoutQuestions(id!);
       const soalData = questionsResponse?.data || questionsResponse;
 
-
       if (!Array.isArray(soalData)) {
         throw new Error("Invalid questions data format");
       }
 
-
       console.log("📝 Questions loaded:", soalData?.length);
-
 
       // ✅ UNCHANGED: Group questions by kategori_id
       const grouped: Record<string, any[]> = {};
@@ -88,9 +79,7 @@ export default function ViewTryout() {
         grouped[q.kategori_id].push(q);
       });
 
-
       setQuestionsByCategory(grouped);
-
 
     } catch (err: any) {
       console.error("❌ Error:", err);
@@ -101,12 +90,10 @@ export default function ViewTryout() {
     }
   };
 
-
   // ✅ UNCHANGED: useEffect
   useEffect(() => {
     fetchTryoutDetail();
   }, [id]);
-
 
   // ✅ UNCHANGED: Toggle category
   const toggleCategory = (categoryId: string) => {
@@ -116,12 +103,10 @@ export default function ViewTryout() {
     }));
   };
 
-
   // ✅ UNCHANGED: Get total questions
   const getTotalQuestions = () => {
     return Object.values(questionsByCategory).reduce((sum, questions) => sum + questions.length, 0);
   };
-
 
   // ✅ UNCHANGED: Loading state
   if (isLoading) {
@@ -133,7 +118,6 @@ export default function ViewTryout() {
       </AdminLayout>
     );
   }
-
 
   // ✅ UNCHANGED: Error state
   if (error || !tryout) {
@@ -149,12 +133,11 @@ export default function ViewTryout() {
     );
   }
 
-
   return (
     <AdminLayout>
       <div className="max-w-[1363px] mx-auto px-4 md:px-6 py-8">
-        {/* Header - TIDAK DIUBAH */}
-        <div className="flex items-center justify-between mb-8">
+        {/* Header - DITAMBAHKAN TOMBOL EXPORT CSV */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div className="flex items-center gap-4">
             <Link
               to="/admin-tryout"
@@ -169,15 +152,20 @@ export default function ViewTryout() {
               </p>
             </div>
           </div>
-          <Link
-            to={`/admin-tryout/edit/${id}`}
-            className="flex items-center gap-2 px-4 py-2 bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90 transition-colors"
-          >
-            <Edit2 className="w-4 h-4" />
-            Edit Tryout
-          </Link>
+          
+          <div className="flex items-center gap-3">
+            {/* ✅ TOMBOL EXPORT CSV */}
+            <ExportCSVButton tryoutId={id!} tryoutName={tryout.nama_tryout} />
+            
+            <Link
+              to={`/admin-tryout/edit/${id}`}
+              className="flex items-center gap-2 px-4 py-2 bg-[#295782] text-white rounded-lg hover:bg-[#295782]/90 transition-colors"
+            >
+              <Edit2 className="w-4 h-4" />
+              Edit Tryout
+            </Link>
+          </div>
         </div>
-
 
         {/* Tryout Info Card - TIDAK DIUBAH */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6">
@@ -211,11 +199,9 @@ export default function ViewTryout() {
           </div>
         </div>
 
-
         {/* Questions by Category - DESIGN TIDAK DIUBAH, TAMBAH IMAGE & PEMBAHASAN SUPPORT */}
         <div className="space-y-4">
           <h2 className="text-xl font-bold text-[#1E293B]">Daftar Soal per Kategori</h2>
-
 
           {Object.entries(questionsByCategory).length === 0 ? (
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-12 text-center">
@@ -235,12 +221,9 @@ export default function ViewTryout() {
                 return sum + (questionsByCategory[sub.id]?.length || 0);
               }, 0);
 
-
               if (categoryTotal === 0) return null;
 
-
               const isExpanded = expandedCategories[category.id];
-
 
               return (
                 <div
@@ -270,7 +253,6 @@ export default function ViewTryout() {
                     />
                   </button>
 
-
                   {/* Subcategories */}
                   {isExpanded && (
                     <div className="border-t border-gray-200">
@@ -278,9 +260,7 @@ export default function ViewTryout() {
                         const questions = questionsByCategory[sub.id] || [];
                         if (questions.length === 0) return null;
 
-
                         const subExpanded = expandedCategories[sub.id];
-
 
                         return (
                           <div key={sub.id} className="border-b border-gray-200 last:border-0">
@@ -303,7 +283,6 @@ export default function ViewTryout() {
                                 }`}
                               />
                             </button>
-
 
                             {/* Questions List */}
                             {subExpanded && (
@@ -343,7 +322,6 @@ export default function ViewTryout() {
                                       </div>
                                     </div>
 
-
                                     {/* Options */}
                                     <div className="ml-9 space-y-2">
                                       {["opsi_a", "opsi_b", "opsi_c", "opsi_d"].map((opsi, idx) => (
@@ -366,8 +344,7 @@ export default function ViewTryout() {
                                       ))}
                                     </div>
 
-
-                                    {/* ✅ NEW: Display Pembahasan if exists */}
+                                    {/* ✅ Display Pembahasan if exists */}
                                     {question.pembahasan && (
                                       <div className="ml-9 mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                                         <div className="flex items-start gap-2">

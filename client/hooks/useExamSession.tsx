@@ -1,6 +1,4 @@
-// client/hooks/useExamSession.tsx - REFACTORED VERSION
-// ✅ Implementasi Atomic Submission Logic dengan Cache Invalidation
-
+// client/hooks/useExamSession.tsx - BATCHING AUTOSAVE VERSION
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
@@ -32,12 +30,12 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
   const [tryoutId, setTryoutId] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // ✅ FIX #2: Ref sebagai guard utama — tidak masuk dependency array useCallback.
-  // Jika isSubmitting (state) dipakai di deps, submitExamLogic dibuat ulang saat submission
-  // dimulai → handleAutoSubmit ikut dibuat ulang → timer effect restart → timer loncat detik.
+  
   const isSubmittingRef = useRef(false);
+  
+  // ✅ NEW: Antrean Jawaban (Queue) untuk Batching
+  const unsyncedQueue = useRef<Record<string, any>>({});
 
-  // ✅ 1. Update Timer (Periodic Sync)
   const updateTimer = useCallback(async (time: number) => {
     try {
       if (time % 10 === 0) console.log('⏱️ Updating timer:', time);
@@ -47,22 +45,62 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
     }
   }, [sessionId]);
 
-  // ✅ 2. ATOMIC SUBMISSION LOGIC (Server-Side dengan Cache Invalidation)
+  // ✅ NEW: Fungsi untuk mengirim borongan jawaban ke server (Flush)
+  const forceSync = useCallback(async () => {
+    const queueItems = Object.values(unsyncedQueue.current);
+    if (queueItems.length === 0) return;
+
+    // Salin dan kosongkan antrean agar tidak dikirim dua kali
+    const itemsToSend = [...queueItems];
+    unsyncedQueue.current = {}; 
+    setIsSaving(true);
+
+    try {
+      console.log(`🔄 Batch Syncing ${itemsToSend.length} answers to database...`);
+      // Kirim sekaligus
+      await Promise.all(itemsToSend.map(item => api.saveAnswerIRT(item)));
+      console.log(`✅ Batch Sync complete.`);
+    } catch (error) {
+      console.error('❌ Error in batch sync:', error);
+      // Jika gagal, kembalikan ke antrean
+      itemsToSend.forEach(item => {
+        unsyncedQueue.current[item.question_id] = item;
+      });
+    } finally {
+      // Matikan indikator saving hanya jika tidak ada antrean baru yang masuk saat proses sync
+      if (Object.keys(unsyncedQueue.current).length === 0) {
+        setIsSaving(false);
+      }
+    }
+  }, []);
+
+  // ✅ NEW: Interval Autosave setiap 10 Detik
+  useEffect(() => {
+    const syncInterval = setInterval(() => {
+      forceSync();
+    }, 10000); // 10 detik
+
+    return () => clearInterval(syncInterval);
+  }, [forceSync]);
+
+
   const submitExamLogic = useCallback(async () => {
-    // ✅ FIX #2: Guard pakai ref bukan state, agar tidak menyebabkan deps berubah
     if (isSubmittingRef.current) {
       console.log('⚠️ Submission already in progress, skipping...');
       return;
     }
 
     try {
-      isSubmittingRef.current = true; // ← set ref SEBELUM set state
+      isSubmittingRef.current = true; 
       setIsSubmitting(true);
       setIsSaving(true);
       
       console.log('📤 Starting atomic submission process...');
 
-      // STEP 1: Update status ke 'completed' di database
+      // ✅ PASTIKAN SEMUA ANTARAN JAWABAN TERKIRIM SEBELUM SUBMIT
+      console.log('0️⃣ Flushing remaining answers in queue...');
+      await forceSync();
+
       console.log('1️⃣ Updating session status to completed...');
       const { error: updateError } = await supabase
         .from('tryout_sessions')
@@ -73,112 +111,76 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
         })
         .eq('id', sessionId);
 
-      if (updateError) {
-        console.error('❌ Error updating session status:', updateError);
-        throw updateError;
-      }
+      if (updateError) throw updateError;
       console.log('✅ Session status updated to completed');
 
-      // STEP 2: Hitung skor IRT via server-side Edge Function
-      // ✅ FIX: IRT calculation bersifat non-blocking.
-      // Jika Edge Function return 400/500, submission TETAP berhasil dan
-      // user tetap diarahkan ke result. Cek Supabase Edge Function Logs
-      // untuk root cause error IRT yang sebenarnya.
       console.log('2️⃣ Calculating IRT score on server...');
       try {
         await api.calculateIRTScoreServer(sessionId);
         console.log('✅ IRT score calculated successfully');
       } catch (irtError: any) {
         console.error('⚠️ IRT calculation failed (non-fatal):', irtError?.message);
-        console.warn('⚠️ Cek Supabase Dashboard → Edge Functions → calculate-irt → Logs');
-        // Tidak throw — submission tetap lanjut
       }
 
-      // STEP 3: CRITICAL - Clear global cache untuk memastikan data segar
       console.log('3️⃣ Clearing global cache...');
       api.clearCache();
-      console.log('✅ Global cache cleared - Dashboard & TryoutList will be fresh');
 
       toast.success('Ujian berhasil dikumpulkan!');
 
-      // STEP 4: Navigate dengan { replace: true } untuk membersihkan navigation stack
       console.log('4️⃣ Navigating to result page...');
       navigate(`/tryout/${tryoutId}/result?session=${sessionId}`, { 
-        replace: true // ✅ CRITICAL: Prevent back navigation to exam page
+        replace: true 
       });
       
     } catch (error: any) {
       console.error('❌ Error submitting exam:', error);
       toast.error(error.message || 'Gagal mengumpulkan jawaban. Silakan coba lagi.');
       
-      // Rollback status jika gagal
       try {
-        await supabase
-          .from('tryout_sessions')
-          .update({ status: 'in_progress' })
-          .eq('id', sessionId);
-        console.log('↩️ Session status rolled back to in_progress');
+        await supabase.from('tryout_sessions').update({ status: 'in_progress' }).eq('id', sessionId);
       } catch (rollbackError) {
         console.error('❌ Error rolling back status:', rollbackError);
       }
     } finally {
-      isSubmittingRef.current = false; // ← selalu reset ref
+      isSubmittingRef.current = false; 
       setIsSaving(false);
       setIsSubmitting(false);
     }
-  // ✅ FIX #2: isSubmitting TIDAK ada di deps — guard pakai ref, bukan state
-  }, [sessionId, tryoutId, navigate]);
+  }, [sessionId, tryoutId, navigate, forceSync]);
 
-  // ✅ 3. Auto Submit Handler (Saat Waktu Habis)
   const handleAutoSubmit = useCallback(async () => {
     console.log('⏰ Time expired. Auto-submitting...');
     await submitExamLogic();
   }, [submitExamLogic]);
 
-  // ✅ 4. Timer Effect dengan Auto-Submit
   useEffect(() => {
     if (timeRemaining > 0 && !isLoading && !isSubmitting) {
       const timer = setInterval(() => {
         setTimeRemaining(prev => {
           const newTime = prev - 1;
-          
-          // Update timer setiap 30 detik
-          if (newTime % 30 === 0) {
-            updateTimer(newTime);
-          }
-          
-          // Auto-submit saat waktu habis
+          if (newTime % 30 === 0) updateTimer(newTime);
           if (newTime <= 0) {
             handleAutoSubmit();
             return 0;
           }
-          
           return newTime;
         });
       }, 1000);
-
       return () => clearInterval(timer);
     }
   }, [timeRemaining, isLoading, isSubmitting, updateTimer, handleAutoSubmit]);
 
-  // ✅ 5. Fetch Session Data
   const fetchSessionData = useCallback(async () => {
     try {
       setIsLoading(true);
-      console.log('🔍 Fetching session data for:', sessionId);
-
       const sessionResponse = await api.getSession(sessionId);
       const sessionData = sessionResponse?.data || sessionResponse;
 
       if (!sessionData) throw new Error('Session data not found');
 
-      // Validasi status sesi
       if (sessionData.status === 'completed') {
-        console.log('⚠️ Session already completed, redirecting...');
         toast.error('Ujian ini sudah selesai.');
-        navigate(`/tryout/${sessionData.tryout_id}/result?session=${sessionId}`, { 
-          replace: true 
-        });
+        navigate(`/tryout/${sessionData.tryout_id}/result?session=${sessionId}`, { replace: true });
         return;
       }
 
@@ -202,9 +204,7 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
           difficulty: q.difficulty || 0,
           discrimination: q.discrimination || 1.0
         }));
-
         setQuestions(questionsWithData);
-        console.log(`✅ Questions loaded: ${questionsWithData.length} (IRT Ready)`);
       }
 
       const answersData = questionsResponse?.answers || {};
@@ -222,66 +222,40 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
   }, [sessionId, navigate]);
 
   useEffect(() => {
-    if (sessionId) {
-      fetchSessionData();
-    }
+    if (sessionId) fetchSessionData();
   }, [sessionId, fetchSessionData]);
 
-  // ✅ 6. Save Answer (IRT Optimized)
-  const saveAnswer = useCallback(async (questionId: string, answer: string) => {
-    try {
-      // Optimistic Update UI
-      setAnswers(prev => ({ ...prev, [questionId]: answer }));
-      setIsSaving(true);
+  // ✅ UPDATE: Save Answer masuk ke Antrean (Queue)
+  const saveAnswer = useCallback((questionId: string, answer: string) => {
+    // Optimistic Update: UI langsung berubah tanpa delay
+    setAnswers(prev => ({ ...prev, [questionId]: answer }));
+    setIsSaving(true);
 
-      const currentQuestion = questions.find(q => String(q.id) === String(questionId));
-      
-      if (!currentQuestion) {
-        console.warn('⚠️ Soal tidak ditemukan di state lokal');
-        return;
-      }
+    const currentQuestion = questions.find(q => String(q.id) === String(questionId));
+    if (!currentQuestion) return;
 
-      const isCorrect = answer === currentQuestion.jawaban_benar;
+    const isCorrect = answer === currentQuestion.jawaban_benar;
 
-      // Save ke tabel 'student_responses' via API
-      await api.saveAnswerIRT({
-        session_id: sessionId,
-        question_id: questionId,
-        selected_answer: answer,
-        is_correct: isCorrect,
-        question_difficulty: currentQuestion.difficulty || 0,
-        question_discrimination: currentQuestion.discrimination || 1.0,
-      });
-
-      console.log(`✅ Progress tersimpan: Soal ${questionId} = ${answer}`);
-
-    } catch (error) {
-      console.error('❌ Error saving answer:', error);
-      toast.error('Gagal menyimpan jawaban. Cek koneksi internet.');
-      
-      // Rollback jika gagal
-      setAnswers(prev => {
-        const updated = { ...prev };
-        delete updated[questionId];
-        return updated;
-      });
-    } finally {
-      setIsSaving(false);
-    }
+    // Simpan ke Queue, bukan langsung tembak API (Debouncing by ID)
+    unsyncedQueue.current[questionId] = {
+      session_id: sessionId,
+      question_id: questionId,
+      selected_answer: answer,
+      is_correct: isCorrect,
+      question_difficulty: currentQuestion.difficulty || 0,
+      question_discrimination: currentQuestion.discrimination || 1.0,
+    };
   }, [sessionId, questions]);
 
-  // ✅ 7. Save Bookmarks
   const saveBookmarks = useCallback(async (bookmarks: number[]) => {
     try {
       setBookmarkedQuestions(bookmarks);
       await api.saveBookmarks(sessionId, bookmarks);
-      console.log('✅ Bookmarks saved:', bookmarks);
     } catch (error) {
       console.error('❌ Error saving bookmarks:', error);
     }
   }, [sessionId]);
 
-  // ✅ 8. Public Submit Function (Wrapper)
   const submitExam = useCallback(async () => {
     await submitExamLogic();
   }, [submitExamLogic]);
@@ -293,6 +267,7 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
     answers,
     saveAnswer,
     submitExam,
+    forceSync, // Dikeluarkan agar bisa dipanggil saat user menekan 'Keluar'
     isLoading,
     timeRemaining,
     tryoutId,

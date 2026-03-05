@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Trophy, Target, BrainCircuit, Percent, Home, RefreshCw, Loader2 } from 'lucide-react';
+import { ArrowLeft, Trophy, Target, BrainCircuit, Users, Home, RefreshCw, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import toast from 'react-hot-toast';
 import Header from '@/components/Header';
@@ -63,12 +63,9 @@ interface ResultStats {
 
 interface IRTData {
   overallTheta: number;
+  rank: number;
+  totalParticipants: number;
   percentile: number;
-  details: {
-    kategoriId: string;
-    theta: number;
-    se: number;
-  }[];
 }
 
 export default function TryoutResult() {
@@ -202,6 +199,23 @@ export default function TryoutResult() {
       setSessionData(currentSession);
       setTryoutData(currentSession.tryout);
 
+      // 🎯 HITUNG PERINGKAT NASIONAL (Memanggil RPC Supabase)
+      const { data: rankingData, error: rankingError } = await supabase.rpc('get_user_tryout_ranking', {
+        p_session_id: sessionId
+      });
+
+      if (!rankingError && rankingData) {
+        setIrtData({
+          overallTheta: serverTheta,
+          rank: rankingData.rank,
+          totalParticipants: rankingData.total,
+          percentile: rankingData.percentile
+        });
+      } else {
+        // Fallback jika terjadi error
+        setIrtData({ overallTheta: serverTheta, rank: 0, totalParticipants: 0, percentile: 0 });
+      }
+
       const { data: questionsData } = await supabase
         .from('questions')
         .select('id, soal_text, opsi_a, opsi_b, opsi_c, opsi_d, jawaban_benar, kategori_id, urutan, image_url, pembahasan, difficulty')
@@ -259,13 +273,6 @@ export default function TryoutResult() {
         timeSpent: 0,
         isPassed: scorePercentage >= passingGradeData,
         passingGrade: passingGradeData,
-      });
-
-      const percentile = (1 / (1 + Math.exp(-1.7 * serverTheta))) * 100;
-      setIrtData({
-        overallTheta: serverTheta,
-        percentile: Math.round(percentile),
-        details: []
       });
 
     } catch (error: any) {
@@ -345,7 +352,6 @@ export default function TryoutResult() {
             <p className="text-xs text-blue-600 mt-1">Halaman ini akan refresh otomatis.</p>
           </div>
 
-          {/* Menambahkan tombol Kembali ke Dashboard di bawah tombol Muat Ulang Manual */}
           <div className="flex flex-col gap-3">
             <button
               onClick={() => window.location.reload()}
@@ -354,7 +360,6 @@ export default function TryoutResult() {
               <RefreshCw className="w-4 h-4" />
               Muat Ulang Manual
             </button>
-
             <button
               onClick={() => navigate('/dashboard')}
               className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-gradient-to-r from-[#295782] to-[#1e4060] text-white rounded-xl hover:shadow-lg transition-all font-medium text-sm"
@@ -410,9 +415,9 @@ export default function TryoutResult() {
           <span className="text-sm font-medium">Kembali ke Daftar Tryout</span>
         </button>
 
-        {/* =============== TOP SUMMARY CARDS =============== */}
+        {/* =============== TOP SUMMARY CARDS (PERINGKAT NASIONAL) =============== */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-2xl shadow-sm p-6 text-center">
+          <div className="bg-white rounded-2xl shadow-sm p-6 text-center border-2 border-blue-50 hover:shadow-md transition-shadow">
             <div className="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <Trophy className="w-7 h-7 text-blue-600" />
             </div>
@@ -420,7 +425,7 @@ export default function TryoutResult() {
             <p className="text-[#62748e]">Skor Klasik (0-100)</p>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm p-6 text-center border-2 border-purple-100">
+          <div className="bg-white rounded-2xl shadow-sm p-6 text-center border-2 border-purple-100 hover:shadow-md transition-shadow">
             <div className="w-14 h-14 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-3">
               <BrainCircuit className="w-7 h-7 text-purple-600" />
             </div>
@@ -428,33 +433,38 @@ export default function TryoutResult() {
               <>
                 <div className="text-4xl font-bold text-purple-700 mb-1">{irtData.overallTheta.toFixed(2)}</div>
                 <div className="text-sm font-medium text-purple-600 bg-purple-50 inline-block px-2 py-1 rounded mb-1">Theta Score</div>
-                <p className="text-[#62748e] text-xs">Kemampuan Murni</p>
+                <p className="text-[#62748e] text-xs">Skor Kemampuan IRT Murni</p>
               </>
             ) : null}
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm p-6 text-center border-2 border-indigo-100">
+          <div className="bg-white rounded-2xl shadow-sm p-6 text-center border-2 border-indigo-200 bg-indigo-50/30 hover:shadow-md transition-shadow">
             <div className="w-14 h-14 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-3">
-              <Percent className="w-7 h-7 text-indigo-600" />
+              <Users className="w-7 h-7 text-indigo-600" />
             </div>
             {irtData ? (
               <>
-                <div className="text-4xl font-bold text-indigo-700 mb-1">Top {Math.max(1, 100 - irtData.percentile)}%</div>
-                <div className="text-sm font-medium text-indigo-600 bg-indigo-50 inline-block px-2 py-1 rounded mb-1">Peringkat Nasional</div>
-                <p className="text-[#62748e] text-xs">Lebih baik dari {irtData.percentile}% peserta</p>
+                <div className="flex items-end justify-center gap-1 mb-1">
+                  <span className="text-4xl font-bold text-indigo-700">#{irtData.rank}</span>
+                  <span className="text-sm text-indigo-600 mb-1 font-medium">/ {irtData.totalParticipants}</span>
+                </div>
+                <div className="text-sm font-bold text-indigo-700 bg-indigo-100 inline-block px-3 py-1 rounded-full mb-1">
+                  Peringkat Nasional
+                </div>
+                <p className="text-[#62748e] text-xs font-medium">Top {100 - irtData.percentile}% (Mengalahkan {irtData.percentile}% peserta)</p>
               </>
             ) : null}
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm p-6 text-center">
+          <div className="bg-white rounded-2xl shadow-sm p-6 text-center border-2 border-gray-100">
             <div className={`w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3 ${stats.isPassed ? 'bg-green-100' : 'bg-red-100'}`}>
               <Target className={`w-7 h-7 ${stats.isPassed ? 'text-green-600' : 'text-red-600'}`} />
             </div>
-            <div className={`inline-block px-6 py-2 rounded-full font-bold text-xl mb-2 ${stats.isPassed ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+            <div className={`inline-block px-6 py-2 rounded-full font-bold text-xl mb-2 shadow-sm ${stats.isPassed ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
               {stats.isPassed ? 'LULUS' : 'GAGAL'}
             </div>
-            <p className="text-[#62748e] text-sm mt-2">Passing Grade: {stats.passingGrade}</p>
-            {targetKampus && targetProdi && <p className="text-xs text-gray-500 mt-1">{targetKampus} - {targetProdi}</p>}
+            <p className="text-[#62748e] text-sm mt-2">Passing Grade: <span className="font-bold">{stats.passingGrade}</span></p>
+            {targetKampus && targetProdi && <p className="text-xs text-gray-500 mt-1 line-clamp-1" title={`${targetKampus} - ${targetProdi}`}>{targetKampus} - {targetProdi}</p>}
           </div>
         </div>
 
@@ -554,7 +564,7 @@ export default function TryoutResult() {
           </div>
         </div>
 
-        {/* =============== ACTION BUTTONS (UPDATED) =============== */}
+        {/* =============== ACTION BUTTONS =============== */}
         <div className="flex flex-col sm:flex-row gap-4 mt-8">
           <button 
             onClick={() => navigate('/tryout')} 

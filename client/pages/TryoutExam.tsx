@@ -1,6 +1,4 @@
-// client/pages/TryoutExam.tsx - REFACTORED VERSION
-// ✅ Implementasi Server-Side Session Guard untuk mencegah akses ke completed exam
-
+// client/pages/TryoutExam.tsx
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Flag } from 'lucide-react';
@@ -22,9 +20,13 @@ export default function TryoutExam() {
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [isVerifying, setIsVerifying] = useState(true); // ✅ NEW: Loading state untuk verifikasi
+  const [isVerifying, setIsVerifying] = useState(true);
 
-  // Get hook data
+  // ✅ STATE ANTI-CHEAT
+  const [cheatWarnings, setCheatWarnings] = useState(0);
+  const MAX_WARNINGS = 3;
+
+  // Get hook data (termasuk fungsi forceSync & submitExam)
   const {
     questions,
     currentIndex,
@@ -32,6 +34,7 @@ export default function TryoutExam() {
     answers,
     saveAnswer,
     submitExam,
+    forceSync, 
     isLoading,
     timeRemaining,
     tryoutId: examTryoutId,
@@ -41,11 +44,10 @@ export default function TryoutExam() {
     saveBookmarks
   } = useExamSession(sessionId || '', kategoriId || undefined);
 
-  // ✅ CRITICAL: Server-Side Session Guard (Navigation Protection)
+  // ✅ VERIFIKASI SESI
   useEffect(() => {
     const verifySessionAccess = async () => {
       if (!sessionId || !tryoutId) {
-        console.log('⚠️ Missing sessionId or tryoutId');
         toast.error('Session tidak valid');
         navigate(`/tryout/${tryoutId}/start`, { replace: true });
         return;
@@ -53,9 +55,6 @@ export default function TryoutExam() {
 
       try {
         setIsVerifying(true);
-        console.log('🔍 Verifying session access for:', sessionId);
-
-        // Query langsung ke Supabase untuk cek status sesi
         const { data: session, error } = await supabase
           .from('tryout_sessions')
           .select('status, tryout_id')
@@ -63,28 +62,18 @@ export default function TryoutExam() {
           .single();
 
         if (error) {
-          console.error('❌ Error verifying session:', error);
           toast.error('Session tidak ditemukan');
           navigate(`/tryout/${tryoutId}/start`, { replace: true });
           return;
         }
 
-        // ✅ CRITICAL CHECK: Jika status sudah 'completed', redirect paksa ke result
         if (session.status === 'completed') {
-          console.log('⚠️ Session already completed, redirecting to result...');
           toast.error('Ujian ini sudah selesai.');
-          navigate(`/tryout/${tryoutId}/result?session=${sessionId}`, { 
-            replace: true // ✅ Prevent back navigation
-          });
+          navigate(`/tryout/${tryoutId}/result?session=${sessionId}`, { replace: true });
           return;
         }
-
-        // ✅ Session valid dan masih in_progress
-        console.log('✅ Session verified, status:', session.status);
         setIsVerifying(false);
-
       } catch (err) {
-        console.error('❌ Error in session verification:', err);
         toast.error('Terjadi kesalahan saat memuat ujian');
         navigate(`/tryout/${tryoutId}/start`, { replace: true });
       }
@@ -93,7 +82,7 @@ export default function TryoutExam() {
     verifySessionAccess();
   }, [sessionId, tryoutId, navigate]);
 
-  // ✅ Fetch current user
+  // ✅ FETCH USER INFO
   useEffect(() => {
     fetchCurrentUser();
   }, []);
@@ -109,12 +98,41 @@ export default function TryoutExam() {
           .single();
         setCurrentUser(userData);
       }
-    } catch (err) {
-      console.error('Error fetching user:', err);
-    }
+    } catch (err) {}
   };
 
-  // ✅ Prevent accidental page close
+  // ✅ FITUR ANTI-CHEAT: Deteksi Pindah Tab / Aplikasi
+  useEffect(() => {
+    if (!sessionId || isSubmitting || isVerifying || isLoading) return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Siswa meninggalkan tab/layar ujian
+        setCheatWarnings((prev) => {
+          const newCount = prev + 1;
+          if (newCount >= MAX_WARNINGS) {
+            toast.error("🚨 PELANGGARAN FATAL! Ujian dikumpulkan paksa karena Anda berulang kali keluar dari layar ujian.", { duration: 8000 });
+            submitExam(); // Kumpulkan paksa otomatis!
+          } else {
+            toast.error(`⚠️ PERINGATAN KECURANGAN (${newCount}/${MAX_WARNINGS})! Jangan tinggalkan halaman ujian atau nilai akan dibatalkan otomatis.`, {
+              duration: 6000,
+              icon: '👀'
+            });
+          }
+          return newCount;
+        });
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [sessionId, isSubmitting, submitExam, isVerifying, isLoading]);
+
+
+  // ✅ MENCEGAH CLOSE TAB TANPA SENGAJA
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (!isSubmitting) {
@@ -122,29 +140,23 @@ export default function TryoutExam() {
         e.returnValue = '';
       }
     };
-
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isSubmitting]);
 
   const handleAnswerSelect = (answer: string) => {
-    if (!currentQuestion) {
-      console.error('❌ No current question');
-      return;
-    }
-
-    console.log('✅ Answer selected:', answer, 'for question ID:', currentQuestion.id);
+    if (!currentQuestion) return;
     saveAnswer(currentQuestion.id, answer);
   };
 
   const currentQuestion = questions[currentIndex];
 
   const handleExit = async () => {
-    console.log('🚪 Exit button clicked');
-
     try {
+      console.log('💾 Syncing remaining answers before exit...');
+      await forceSync();
+
       if (bookmarkedQuestions.length > 0) {
-        console.log('💾 Saving bookmarks before exit:', bookmarkedQuestions);
         await saveBookmarks(bookmarkedQuestions);
       }
 
@@ -158,7 +170,6 @@ export default function TryoutExam() {
 
       toast.success('Progress tersimpan');
     } catch (err) {
-      console.error('Error saving progress:', err);
       toast.error('Gagal menyimpan progress');
     }
 
@@ -167,7 +178,6 @@ export default function TryoutExam() {
 
   const handleToggleBookmark = async () => {
     let updated: number[];
-
     if (bookmarkedQuestions.includes(currentIndex)) {
       updated = bookmarkedQuestions.filter(q => q !== currentIndex);
       toast.success('Tanda soal dihapus');
@@ -175,67 +185,40 @@ export default function TryoutExam() {
       updated = [...bookmarkedQuestions, currentIndex];
       toast.success('Soal ditandai');
     }
-
     await saveBookmarks(updated);
   };
 
   const handlePrevious = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(currentIndex - 1);
-    }
+    if (currentIndex > 0) setCurrentIndex(currentIndex - 1);
   };
 
   const handleNext = () => {
-    if (currentIndex < questions.length - 1) {
-      setCurrentIndex(currentIndex + 1);
-    }
+    if (currentIndex < questions.length - 1) setCurrentIndex(currentIndex + 1);
   };
 
-  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft' && currentIndex > 0) {
-        setCurrentIndex(currentIndex - 1);
-      } else if (e.key === 'ArrowRight' && currentIndex < questions.length - 1) {
-        setCurrentIndex(currentIndex + 1);
-      }
+      if (e.key === 'ArrowLeft' && currentIndex > 0) setCurrentIndex(currentIndex - 1);
+      else if (e.key === 'ArrowRight' && currentIndex < questions.length - 1) setCurrentIndex(currentIndex + 1);
     };
-
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [currentIndex, questions.length, setCurrentIndex]);
 
-  // Format time display
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // ✅ Guard: Return null while redirecting (prevent flicker)
-  if (!sessionId) {
-    return null;
-  }
+  if (!sessionId) return null;
 
-  // ✅ Show loading during verification (prevent showing exam content before verification)
-  if (isVerifying) {
+  if (isVerifying || isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#295782] mx-auto"></div>
-          <p className="mt-4 text-gray-600">Memverifikasi akses...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // ✅ Loading state for questions
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#295782] mx-auto"></div>
-          <p className="mt-4 text-gray-600">Memuat soal...</p>
+          <p className="mt-4 text-gray-600">{isVerifying ? 'Memverifikasi akses...' : 'Memuat soal...'}</p>
         </div>
       </div>
     );
@@ -244,77 +227,67 @@ export default function TryoutExam() {
   if (!currentQuestion) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-gray-600">Soal tidak ditemukan</p>
-        </div>
+        <p className="text-gray-600">Soal tidak ditemukan</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-50/30 to-white">
-      {/* Header Component */}
+    // ✅ FITUR ANTI-CHEAT: Blokir Kursor (select-none) dan Klik Kanan/Copy-Paste
+    <div 
+      className="min-h-screen bg-gradient-to-br from-blue-50 via-blue-50/30 to-white select-none"
+      onContextMenu={(e) => e.preventDefault()} // Blokir klik kanan
+      onCopy={(e) => e.preventDefault()} // Blokir Copy
+      onPaste={(e) => e.preventDefault()} // Blokir Paste
+      onCut={(e) => e.preventDefault()} // Blokir Cut
+    >
       <Header
         userName={currentUser?.username || currentUser?.nama_lengkap || 'User'}
         userPhoto={currentUser?.photo_profile}
       />
 
-      {/* Main Content */}
       <div className="container mx-auto px-4 sm:px-6 lg:px-12 py-6">
-        {/* Title and Timer Section with Exit Button */}
+        {/* Peringatan Tampil jika ada pelanggaran */}
+        {cheatWarnings > 0 && (
+          <div className="mb-4 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded shadow-sm flex justify-between items-center animate-pulse">
+            <div>
+              <p className="font-bold">⚠️ Sistem Pengawas Aktif!</p>
+              <p className="text-sm">Anda telah terdeteksi meninggalkan halaman sebanyak <strong>{cheatWarnings} kali</strong>. Jika mencapai {MAX_WARNINGS} kali, ujian otomatis dihentikan.</p>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-start justify-between mb-6">
           <div className="flex items-center gap-4">
-            {/* Tombol Keluar */}
             <button
               onClick={handleExit}
               disabled={isSubmitting}
               className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
             >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M15 19l-7-7 7-7"
-                />
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
               </svg>
               <span className="font-medium">Keluar</span>
             </button>
 
             <div>
-              <h1 className="text-2xl font-medium text-gray-800 mb-2">
-                Ujian/Tes
-              </h1>
-              <p className="text-lg font-medium text-[#4A90E2]">
-                Soal {currentIndex + 1} dari {questions.length}
-              </p>
+              <h1 className="text-2xl font-medium text-gray-800 mb-2">Ujian/Tes</h1>
+              <p className="text-lg font-medium text-[#4A90E2]">Soal {currentIndex + 1} dari {questions.length}</p>
             </div>
           </div>
 
           <div className="hidden sm:flex items-center gap-2 text-lg text-gray-700">
             <span className="font-medium">Waktu Tersisa:</span>
-            <span className="font-mono text-xl font-bold">
-              {formatTime(timeRemaining)}
-            </span>
+            <span className="font-mono text-xl font-bold">{formatTime(timeRemaining)}</span>
           </div>
         </div>
 
-        {/* Mobile Timer */}
         <div className="sm:hidden mb-4 flex items-center gap-2 text-base text-gray-700">
           <span className="font-medium">Waktu Tersisa:</span>
-          <span className="font-mono text-lg font-bold">
-            {formatTime(timeRemaining)}
-          </span>
+          <span className="font-mono text-lg font-bold">{formatTime(timeRemaining)}</span>
         </div>
 
-        {/* Question Card and Sidebar Layout */}
         <div className="flex flex-col lg:flex-row gap-5">
-          {/* Main Question Area */}
           <div className="flex-1">
             <QuestionDisplay
               question={currentQuestion}
@@ -323,36 +296,22 @@ export default function TryoutExam() {
               isSaving={isSaving}
             />
 
-            {/* Navigation Buttons */}
             <div className="mt-8 pt-6 border-t border-gray-200 flex flex-col sm:flex-row justify-between gap-4">
-              {/* Tombol Sebelumnya */}
               {currentIndex > 0 && (
                 <button
                   onClick={handlePrevious}
                   disabled={isSubmitting}
                   className="rounded-xl border-2 border-[#4A90E2] text-[#4A90E2] hover:bg-blue-50 px-6 py-2.5 font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 19l-7-7 7-7"
-                    />
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                   </svg>
                   <span>Sebelumnya</span>
                 </button>
               )}
 
-              {/* Spacer */}
               {currentIndex === 0 && <div></div>}
 
-              {/* Tombol Selanjutnya atau Selesai */}
               {currentIndex < questions.length - 1 ? (
                 <button
                   onClick={handleNext}
@@ -360,18 +319,8 @@ export default function TryoutExam() {
                   className="rounded-xl bg-[#295782] hover:bg-[#1e3f5f] text-white px-8 py-2.5 font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <span>Selanjutnya</span>
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 5l7 7-7 7"
-                    />
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
               ) : (
@@ -386,33 +335,19 @@ export default function TryoutExam() {
             </div>
           </div>
 
-          {/* Right Sidebar - Question Navigator */}
           <div className="lg:w-64">
             <div className="bg-white rounded-xl shadow-lg p-6 sticky top-6">
-              {/* Bookmark Button */}
               <button
                 onClick={handleToggleBookmark}
                 disabled={isSubmitting}
                 className={`w-full mb-6 px-4 py-2.5 rounded-xl transition-colors flex items-center justify-center gap-2 font-medium disabled:opacity-50 ${
-                  bookmarkedQuestions.includes(currentIndex)
-                    ? 'bg-red-600 hover:bg-red-700 text-white'
-                    : 'bg-gray-700 hover:bg-gray-800 text-white'
+                  bookmarkedQuestions.includes(currentIndex) ? 'bg-red-600 hover:bg-red-700 text-white' : 'bg-gray-700 hover:bg-gray-800 text-white'
                 }`}
               >
-                <Flag
-                  size={18}
-                  className={
-                    bookmarkedQuestions.includes(currentIndex)
-                      ? 'fill-current'
-                      : ''
-                  }
-                />
-                {bookmarkedQuestions.includes(currentIndex)
-                  ? 'Batal Tandai Soal'
-                  : 'Tandai Soal'}
+                <Flag size={18} className={bookmarkedQuestions.includes(currentIndex) ? 'fill-current' : ''} />
+                {bookmarkedQuestions.includes(currentIndex) ? 'Batal Tandai Soal' : 'Tandai Soal'}
               </button>
 
-              {/* Question Grid */}
               <div className="grid grid-cols-5 gap-2 mb-6">
                 {questions.map((question, index) => {
                   const isAnswered = !!answers[question.id];
@@ -440,7 +375,6 @@ export default function TryoutExam() {
                 })}
               </div>
 
-              {/* Legend */}
               <div className="space-y-2.5 text-xs">
                 <p className="font-semibold text-gray-700 mb-3">Keterangan:</p>
                 <div className="flex items-center gap-2">
@@ -457,15 +391,12 @@ export default function TryoutExam() {
         </div>
       </div>
 
-      {/* Submit Confirmation Modal */}
       {showSubmitConfirm && (
         <>
           <div className="fixed inset-0 bg-black/50 z-50" onClick={() => !isSubmitting && setShowSubmitConfirm(false)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl">
-              <h3 className="text-xl font-bold text-gray-900 mb-3">
-                Kumpulkan Jawaban?
-              </h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-3">Kumpulkan Jawaban?</h3>
               <p className="text-gray-600 mb-4">
                 Jawaban Anda akan dikumpulkan dan nilai akan dihitung. Setelah dikumpulkan, Anda akan diarahkan ke halaman hasil.
               </p>
@@ -493,7 +424,6 @@ export default function TryoutExam() {
         </>
       )}
 
-      {/* Question Sidebar Modal (Mobile) */}
       <QuestionSidebar
         show={showSidebar}
         questions={questions}
