@@ -16,8 +16,9 @@ export default function BulkImportUsersModal({ show, onClose, onSuccess }: BulkI
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const downloadTemplate = () => {
-    const headers = "nama_lengkap,email,password,asal_sekolah,tokens\n";
-    const sample = "Budi Santoso,budi.sman1@gmail.com,Budi123!,SMAN 1 Bandung,1\nSiti Aminah,siti.sman1@gmail.com,Siti123!,SMAN 1 Bandung,1";
+    // Ubah baris ini:
+    const headers = "nama_lengkap,email,asal_sekolah,tokens\n";
+    const sample = "Budi Santoso,budi.sman1@gmail.com,SMAN 1 Bandung,1\nSiti Aminah,siti.sman1@gmail.com,SMAN 1 Bandung,1";
     const blob = new Blob([headers + sample], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -71,8 +72,8 @@ export default function BulkImportUsersModal({ show, onClose, onSuccess }: BulkI
     
     // Validasi Kolom
     const firstRow = parsedData[0];
-    if (!firstRow.email || !firstRow.password || !firstRow.nama_lengkap) {
-      toast.error("Header CSV salah! Pastikan ada kolom: nama_lengkap, email, password");
+    if (!firstRow.email || !firstRow.nama_lengkap) {
+      toast.error("Header CSV salah! Pastikan ada kolom: nama_lengkap, email");
       return;
     }
 

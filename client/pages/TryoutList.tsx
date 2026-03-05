@@ -179,7 +179,9 @@ export default function TryoutList() {
       toast.error("Tryout belum dibuka.");
       return;
     }
-    if (tryout.progress.status === 'not_started' && closeDate && now > closeDate) {
+    
+    // Perbaikan: Kunci semua jika waktu sudah lewat dan belum disubmit
+    if (closeDate && now > closeDate && tryout.progress.status !== 'completed') {
       toast.error("Waktu pengerjaan tryout sudah ditutup.");
       return;
     }
@@ -354,7 +356,7 @@ export default function TryoutList() {
               let isLocked = false;
               let btnText = "Mulai (1 Token)";
               let btnStyle = "bg-gradient-to-r from-[#295782] to-[#1e4060] text-white hover:shadow-xl";
-              let Icon: any = Lock; // <-- Tambahkan tipe : any di sini
+              let Icon: any = Lock;
 
               if (isCompleted) {
                 if (!tryout.is_result_published) {
@@ -365,20 +367,21 @@ export default function TryoutList() {
                 } else {
                   btnText = "Review Hasil";
                   btnStyle = "bg-green-100 text-green-700 hover:bg-green-200";
-                  Icon = null; // <-- Ubah menjadi null saja
+                  Icon = null; 
                 }
               } else if (openDate && now < openDate) {
                 btnText = `Buka dalam ${formatCountdown(openDate)}`;
                 isLocked = true;
                 btnStyle = "bg-gray-200 text-gray-500 cursor-not-allowed";
-              } else if (tryout.progress.status === 'not_started' && closeDate && now > closeDate) {
-                btnText = "Ditutup";
+              } else if (closeDate && now > closeDate) { // ✅ FIX: Kunci paksa siapa saja jika waktu sudah lewat
+                btnText = "Waktu Habis";
                 isLocked = true;
                 btnStyle = "bg-red-100 text-red-700 cursor-not-allowed";
+                Icon = Lock;
               } else if (tryout.progress.status === 'in_progress') {
                 btnText = "Lanjutkan";
                 btnStyle = "bg-white border border-[#295782] text-[#295782] hover:bg-blue-50";
-                Icon = null; // <-- Ubah menjadi null saja
+                Icon = null;
               }
 
               return (
@@ -427,7 +430,7 @@ export default function TryoutList() {
                     disabled={isStarting || isLocked}
                     className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-[13px] font-semibold transition-all mt-2 ${btnStyle} ${isStarting ? 'opacity-70 cursor-wait' : ''}`}
                   >
-                    {isLocked && <Icon className="w-3.5 h-3.5" />}
+                    {isLocked && Icon && <Icon className="w-3.5 h-3.5" />}
                     {btnText}
                   </button>
                 </div>

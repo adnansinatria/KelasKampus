@@ -30,7 +30,7 @@ serve(async (req: any) => {
       // 1. Buat Akun Auth
       const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
         email: u.email,
-        password: u.password,
+        password: 'Siswa123!',
         email_confirm: true,
         user_metadata: { 
           nama_lengkap: u.nama_lengkap,

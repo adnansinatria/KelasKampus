@@ -22,7 +22,6 @@ import {
   Radar
 } from 'recharts';
 
-// ... (Interface tetap sama, tidak perlu diubah) ...
 interface QuestionResult {
   id: string;
   questionNumber: number;
@@ -79,8 +78,8 @@ export default function TryoutResult() {
   const sessionId = searchParams.get('session');
 
   const [isLoading, setIsLoading] = useState(true);
-  const [isProcessing, setIsProcessing] = useState(false); // ✅ State baru untuk status "Sedang Menilai"
-  const pollingInterval = useRef<NodeJS.Timeout | null>(null); // ✅ Ref untuk timer
+  const [isProcessing, setIsProcessing] = useState(false);
+  const pollingInterval = useRef<NodeJS.Timeout | null>(null);
 
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [tryoutData, setTryoutData] = useState<any>(null);
@@ -104,7 +103,6 @@ export default function TryoutResult() {
 
     initializeResult();
 
-    // Cleanup timer saat component unmount
     return () => stopPolling();
   }, [sessionId]);
 
@@ -143,7 +141,6 @@ export default function TryoutResult() {
   };
 
   const fetchPassingGrade = async (userId: string): Promise<number> => {
-    // ... (Kode fetchPassingGrade SAMA PERSIS dengan sebelumnya) ...
     try {
       const { data: userTarget, error: targetError } = await supabase
         .from('user_targets')
@@ -171,12 +168,10 @@ export default function TryoutResult() {
 
   const fetchResultData = async (userId: string) => {
     try {
-      // Jangan set isLoading(true) jika sedang polling (agar tidak kedip-kedip)
       if (!isProcessing) setIsLoading(true);
       
       console.log('🔍 Fetching result from server...');
 
-      // 1. Ambil Data Sesi
       const { data: currentSession, error: sessionsError } = await supabase
         .from('tryout_sessions')
         .select(`*, tryout:tryouts (nama_tryout, durasi_menit)`)
@@ -185,32 +180,28 @@ export default function TryoutResult() {
 
       if (sessionsError || !currentSession) throw new Error('Sesi tidak ditemukan');
 
-      // ✅ CEK STATUS PENILAIAN (ASYNCHRONOUS CHECK)
       const serverTheta = currentSession.irt_theta;
       
       if (serverTheta === null || serverTheta === undefined) {
         console.log('⏳ Nilai belum keluar, mengaktifkan polling...');
         setIsProcessing(true);
-        setIsLoading(false); // Stop loading screen, masuk ke processing screen
+        setIsLoading(false);
 
-        // Aktifkan Auto-Refresh setiap 3 detik jika belum aktif
         if (!pollingInterval.current) {
           pollingInterval.current = setInterval(() => {
             fetchResultData(userId);
           }, 3000);
         }
-        return; // ⛔ STOP DISINI, JANGAN RENDER HASIL DULU
+        return; 
       }
 
-      // ✅ JIKA NILAI SUDAH KELUAR
       console.log('✅ Nilai ditemukan:', serverTheta);
-      stopPolling(); // Matikan polling
+      stopPolling(); 
       setIsProcessing(false);
       
       setSessionData(currentSession);
       setTryoutData(currentSession.tryout);
 
-      // 2. Ambil Soal & Jawaban (Kode SAMA dengan sebelumnya)
       const { data: questionsData } = await supabase
         .from('questions')
         .select('id, soal_text, opsi_a, opsi_b, opsi_c, opsi_d, jawaban_benar, kategori_id, urutan, image_url, pembahasan, difficulty')
@@ -227,7 +218,6 @@ export default function TryoutResult() {
         answersMap[answer.question_id] = answer.selected_answer;
       });
 
-      // 3. Proses Mapping (Kode SAMA)
       let localCorrect = 0;
       let localWrong = 0;
       let localUnanswered = 0;
@@ -259,7 +249,6 @@ export default function TryoutResult() {
       const topicAnalysis = calculateTopicStats(processedQuestions);
       setTopicStats(topicAnalysis);
 
-      // 4. Set Stats
       const scorePercentage = Math.round(currentSession.percentage_score || 0);
       setStats({
         score: scorePercentage, 
@@ -272,7 +261,6 @@ export default function TryoutResult() {
         passingGrade: passingGradeData,
       });
 
-      // 5. Set IRT Data
       const percentile = (1 / (1 + Math.exp(-1.7 * serverTheta))) * 100;
       setIrtData({
         overallTheta: serverTheta,
@@ -290,7 +278,6 @@ export default function TryoutResult() {
   };
 
   const calculateTopicStats = (questions: QuestionResult[]): TopicStats[] => {
-    // ... (Logika calculateTopicStats SAMA PERSIS dengan sebelumnya) ...
     const topicMap: Record<string, TopicStats> = {};
     const topicNameMap: Record<string, string> = {
       'biologi': 'Biologi', 'kimia': 'Kimia', 'fisika': 'Fisika', 'matematika': 'Matematika',
@@ -318,7 +305,6 @@ export default function TryoutResult() {
     return statsArray.sort((a, b) => b.percentage - a.percentage);
   };
 
-  // 1. TAMPILAN LOADING AWAL
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-[#e6f3ff] via-[#f8fbff] to-white flex items-center justify-center">
@@ -330,7 +316,6 @@ export default function TryoutResult() {
     );
   }
 
-  // 2. ✅ TAMPILAN "SEDANG MENILAI" (WAITING ROOM)
   if (isProcessing) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-[#e6f3ff] via-[#f8fbff] to-white flex items-center justify-center px-4">
@@ -360,19 +345,29 @@ export default function TryoutResult() {
             <p className="text-xs text-blue-600 mt-1">Halaman ini akan refresh otomatis.</p>
           </div>
 
-          <button
-            onClick={() => window.location.reload()}
-            className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-white border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 transition-colors font-medium text-sm"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Muat Ulang Manual
-          </button>
+          {/* Menambahkan tombol Kembali ke Dashboard di bawah tombol Muat Ulang Manual */}
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => window.location.reload()}
+              className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-white border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 transition-colors font-medium text-sm"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Muat Ulang Manual
+            </button>
+
+            <button
+              onClick={() => navigate('/dashboard')}
+              className="flex items-center justify-center gap-2 w-full px-4 py-3 bg-gradient-to-r from-[#295782] to-[#1e4060] text-white rounded-xl hover:shadow-lg transition-all font-medium text-sm"
+            >
+              <Home className="w-4 h-4" />
+              Kembali ke Dashboard
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // 3. TAMPILAN ERROR (Jika data null tapi tidak processing)
   if (!stats || !tryoutData) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-[#e6f3ff] via-[#f8fbff] to-white flex items-center justify-center">
@@ -388,8 +383,6 @@ export default function TryoutResult() {
     );
   }
 
-  // ... (Sisa kode return JSX tampilan hasil SAMA PERSIS dengan sebelumnya) ...
-  // Salin bagian return tampilan utama dari kode sebelumnya di sini.
   const distributionData = [
     { name: 'Benar', value: stats.correct, fill: '#3b82f6' },
     { name: 'Salah', value: stats.wrong, fill: '#ef4444' }, 
@@ -561,17 +554,33 @@ export default function TryoutResult() {
           </div>
         </div>
 
-        {/* =============== ACTION BUTTONS =============== */}
-        <div className="flex flex-col sm:flex-row gap-4">
-          <button onClick={() => navigate(`/tryout/${tryoutId}/tryoutrecommendations`)} className="flex-1 flex items-center justify-center gap-2 px-6 py-3 border-2 border-[#295782] text-[#295782] rounded-xl font-semibold hover:bg-blue-50 transition-colors">
+        {/* =============== ACTION BUTTONS (UPDATED) =============== */}
+        <div className="flex flex-col sm:flex-row gap-4 mt-8">
+          <button 
+            onClick={() => navigate('/tryout')} 
+            className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-white border-2 border-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
+          >
+            <ArrowLeft className="w-5 h-5" />
+            Daftar Tryout
+          </button>
+
+          <button 
+            onClick={() => navigate(`/tryout/${tryoutId}/tryoutrecommendations`)} 
+            className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 border-2 border-[#295782] text-[#295782] rounded-xl font-semibold hover:bg-blue-50 transition-all shadow-sm"
+          >
             <BrainCircuit className="w-5 h-5" />
             Lihat Rekomendasi
           </button>
-          <button onClick={() => navigate('/dashboard')} className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-[#295782] text-white rounded-xl font-semibold hover:bg-[#1e3f5f] transition-colors shadow-md hover:shadow-lg">
+
+          <button 
+            onClick={() => navigate('/dashboard')} 
+            className="flex-1 flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-[#295782] to-[#1e4060] text-white rounded-xl font-semibold hover:shadow-lg transition-all"
+          >
             <Home className="w-5 h-5" />
             Kembali ke Dashboard
           </button>
         </div>
+
       </div>
     </div>
   );

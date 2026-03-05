@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Play, Clock, FileText, Calendar, CheckCircle, Eye, Lock } from 'lucide-react';
+import { ArrowLeft, Play, Clock, FileText, Calendar, CheckCircle, Eye, Lock, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import toast from 'react-hot-toast';
@@ -18,8 +18,8 @@ export default function TryoutStart() {
   const [showTargetModal, setShowTargetModal] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [globalProgress, setGlobalProgress] = useState<any>(null);
+  const [isProgressLoading, setIsProgressLoading] = useState(true); // ✅ FIX: State Loading untuk mencegah glitch
 
-  // STATE UNTUK TIMER
   const [now, setNow] = useState(new Date());
   
   const {
@@ -32,17 +32,13 @@ export default function TryoutStart() {
     refreshData
   } = useTryoutData(tryoutId!);
 
-  // Timer berdetak setiap detik
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Auto-refresh data saat window mendapat fokus kembali
   useEffect(() => {
-    const handleWindowFocus = () => {
-      refreshData();
-    };
+    const handleWindowFocus = () => refreshData();
     window.addEventListener('focus', handleWindowFocus);
     return () => window.removeEventListener('focus', handleWindowFocus);
   }, [refreshData]);
@@ -64,32 +60,36 @@ export default function TryoutStart() {
   }, []);
 
   useEffect(() => {
-    if (!isLoading && !targetInfo) {
-      setShowTargetModal(true);
-    }
+    if (!isLoading && !targetInfo) setShowTargetModal(true);
   }, [isLoading, targetInfo]);
 
   useEffect(() => {
     if (tryoutId) {
+      setIsProgressLoading(true);
       api.getUserProgress(tryoutId)
         .then(res => setGlobalProgress(res))
-        .catch(() => console.log("Progress not found"));
+        .catch(() => console.log("Progress not found"))
+        .finally(() => setIsProgressLoading(false)); // ✅ FIX: Loading selesai
     }
   }, [tryoutId]);
 
-  // HELPER UNTUK COUNTDOWN PADA TOMBOL
   const formatCountdown = (targetDate: Date) => {
     const diff = targetDate.getTime() - now.getTime();
     if (diff <= 0) return null;
-    
     const h = Math.floor(diff / (1000 * 60 * 60));
     const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     const s = Math.floor((diff % (1000 * 60)) / 1000);
-    
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
   const handleStartTryout = async (kategoriKode?: string) => {
+    // ✅ FIX: Proteksi fungsi agar tidak bisa ditembus dari inspect element
+    const currentState = getButtonState();
+    if (currentState.type === 'locked' || currentState.type === 'view_result') {
+      toast.error('Akses Tryout ditutup atau sudah selesai!');
+      return;
+    }
+
     if (!targetInfo) {
       toast.error('Pilih kampus dan jurusan terlebih dahulu!');
       setShowTargetModal(true);
@@ -98,7 +98,6 @@ export default function TryoutStart() {
 
     try {
       setIsStarting(true);
-      
       const { data: existingSession } = await supabase
         .from('tryout_sessions')
         .select('id, status')
@@ -128,11 +127,9 @@ export default function TryoutStart() {
       }
 
       if (!sessionId) throw new Error('Gagal mendapatkan Session ID');
-
       const params = new URLSearchParams();
       params.set('session', sessionId);
       if (kategoriKode) params.set('kategori', kategoriKode);
-
       navigate(`/tryout/${tryoutId}/exam?${params.toString()}`);
 
     } catch (err: any) {
@@ -148,7 +145,11 @@ export default function TryoutStart() {
   };
 
   const getButtonState = () => {
-    // 1. CEK JADWAL & SCORING DULU
+    // ✅ FIX: Mencegah Race Condition dengan Loading State
+    if (isProgressLoading) {
+      return { type: 'locked', label: 'Memeriksa Data...', icon: <Loader2 className="w-5 h-5 animate-spin" />, disabled: true, gradient: 'from-gray-400 to-gray-500' };
+    }
+
     const openDate = tryout?.open_date ? new Date(tryout.open_date) : null;
     const closeDate = tryout?.close_date ? new Date(tryout.close_date) : null;
     const overallStatus = globalProgress?.status || 'not_started';
@@ -164,11 +165,12 @@ export default function TryoutStart() {
     if (openDate && now < openDate) {
       return { type: 'locked', label: `Buka dalam: ${formatCountdown(openDate)}`, icon: <Lock className="w-5 h-5" />, disabled: true, gradient: 'from-gray-400 to-gray-500' };
     }
-    if (closeDate && now > closeDate && overallStatus === 'not_started') {
-      return { type: 'locked', label: 'Waktu Ditutup', icon: <Lock className="w-5 h-5" />, disabled: true, gradient: 'from-red-400 to-red-500' };
+    
+    // ✅ FIX: Lock mutlak jika waktu habis dan belum submit
+    if (closeDate && now > closeDate) {
+      return { type: 'locked', label: 'Waktu Habis', icon: <Lock className="w-5 h-5" />, disabled: true, gradient: 'from-red-400 to-red-500' };
     }
 
-    // 2. JIKA JADWAL AMAN, CEK PROGRESS NORMAL
     const progressValues = Object.values(progressData);
     const hasInProgress = progressValues.some(p => p.status === 'in_progress');
     
@@ -248,7 +250,8 @@ export default function TryoutStart() {
               groupedKategoris={groupedKategoris}
               progressData={progressData}
               onStartSubtest={handleStartTryout}
-              canStart={!!targetInfo}
+              // ✅ FIX: Mematikan seluruh tombol subtes jika tombol utama terkunci atau berstatus view_result
+              canStart={!!targetInfo && !isProgressLoading && (buttonState.type === 'start' || buttonState.type === 'continue')}
               isStarting={isStarting}
             />
           </div>
@@ -292,7 +295,7 @@ export default function TryoutStart() {
               </ul>
             </div>
 
-            {/* ACTION BUTTON DENGAN TIMER */}
+            {/* ACTION BUTTON DENGAN TIMER & LOADING STATE */}
             <button
               onClick={buttonState.action}
               disabled={isStarting || buttonState.disabled || (!targetInfo && buttonState.type === 'start')}
@@ -308,6 +311,16 @@ export default function TryoutStart() {
                 <>{buttonState.icon} {buttonState.label}</>
               )}
             </button>
+
+            {/* ✅ FIX: Warning Message Disembunyikan Saat Loading Database */}
+            {!targetInfo && buttonState.type === 'start' && !isProgressLoading && (
+              <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center">
+                <p className="text-xs text-orange-600 font-medium">
+                  ⚠️ Pilih kampus dan program studi terlebih dahulu
+                </p>
+              </div>
+            )}
+
           </div>
         </div>
       </div>
