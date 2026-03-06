@@ -324,18 +324,23 @@ export const api = {
     });
   },
 
-  // ✅ NEW: Save Answer ke tabel 'student_responses' (IRT Optimized)
+  // ✅ NEW & SECURE: Save Answer menggunakan RPC Supabase (Tanpa kirim Kunci Jawaban)
   saveAnswerIRT: async (body: {
     session_id: string;
     question_id: string;
     selected_answer: string;
-    is_correct: boolean;
-    question_difficulty: number;
-    question_discrimination: number;
   }) => {
-    return supabase.from('student_responses').upsert(body, { 
-      onConflict: 'session_id,question_id'
+    const { error } = await supabase.rpc('save_student_answer', {
+      p_session_id: body.session_id,
+      p_question_id: body.question_id,
+      p_selected_answer: body.selected_answer
     });
+    
+    if (error) {
+      console.error("RPC Save Answer Error:", error);
+      throw error;
+    }
+    return { success: true };
   },
 
   updateTimer: async (sessionId: string, timeRemaining: number) => {
@@ -512,9 +517,9 @@ export const api = {
   adminCreateTryout: async (body: {
     nama_tryout: string;
     tanggal_ujian: string;
-    open_date?: string;            // Tambahkan ini
-    close_date?: string;           // Tambahkan ini
-    is_result_published?: boolean; // Tambahkan ini
+    open_date?: string;            
+    close_date?: string;           
+    is_result_published?: boolean; 
     kategori: string;
     durasi_menit: number;
     status: string;
@@ -575,7 +580,7 @@ export const api = {
     return apiCall('/bulk-create-users', {
       method: 'POST',
       body: JSON.stringify({ users }),
-    }, 60000); // Timeout diperpanjang jadi 60 detik karena proses massal
+    }, 60000); 
   },
 
   // ✅ CRITICAL: Export cache methods untuk akses eksternal

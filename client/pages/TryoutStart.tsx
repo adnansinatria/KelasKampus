@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Play, Clock, FileText, Calendar, CheckCircle, Eye, Lock, Loader2 } from 'lucide-react';
+import { ArrowLeft, Play, Clock, Calendar, Eye, Lock, Loader2, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { id as idLocale } from 'date-fns/locale';
 import toast from 'react-hot-toast';
@@ -18,7 +18,7 @@ export default function TryoutStart() {
   const [showTargetModal, setShowTargetModal] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [globalProgress, setGlobalProgress] = useState<any>(null);
-  const [isProgressLoading, setIsProgressLoading] = useState(true); // ✅ FIX: State Loading untuk mencegah glitch
+  const [isProgressLoading, setIsProgressLoading] = useState(true); 
 
   const [now, setNow] = useState(new Date());
   
@@ -69,7 +69,7 @@ export default function TryoutStart() {
       api.getUserProgress(tryoutId)
         .then(res => setGlobalProgress(res))
         .catch(() => console.log("Progress not found"))
-        .finally(() => setIsProgressLoading(false)); // ✅ FIX: Loading selesai
+        .finally(() => setIsProgressLoading(false)); 
     }
   }, [tryoutId]);
 
@@ -83,7 +83,6 @@ export default function TryoutStart() {
   };
 
   const handleStartTryout = async (kategoriKode?: string) => {
-    // ✅ FIX: Proteksi fungsi agar tidak bisa ditembus dari inspect element
     const currentState = getButtonState();
     if (currentState.type === 'locked' || currentState.type === 'view_result') {
       toast.error('Akses Tryout ditutup atau sudah selesai!');
@@ -145,7 +144,6 @@ export default function TryoutStart() {
   };
 
   const getButtonState = () => {
-    // ✅ FIX: Mencegah Race Condition dengan Loading State
     if (isProgressLoading) {
       return { type: 'locked', label: 'Memeriksa Data...', icon: <Loader2 className="w-5 h-5 animate-spin" />, disabled: true, gradient: 'from-gray-400 to-gray-500' };
     }
@@ -166,7 +164,6 @@ export default function TryoutStart() {
       return { type: 'locked', label: `Buka dalam: ${formatCountdown(openDate)}`, icon: <Lock className="w-5 h-5" />, disabled: true, gradient: 'from-gray-400 to-gray-500' };
     }
     
-    // ✅ FIX: Lock mutlak jika waktu habis dan belum submit
     if (closeDate && now > closeDate) {
       return { type: 'locked', label: 'Waktu Habis', icon: <Lock className="w-5 h-5" />, disabled: true, gradient: 'from-red-400 to-red-500' };
     }
@@ -250,7 +247,6 @@ export default function TryoutStart() {
               groupedKategoris={groupedKategoris}
               progressData={progressData}
               onStartSubtest={handleStartTryout}
-              // ✅ FIX: Mematikan seluruh tombol subtes jika tombol utama terkunci atau berstatus view_result
               canStart={!!targetInfo && !isProgressLoading && (buttonState.type === 'start' || buttonState.type === 'continue')}
               isStarting={isStarting}
             />
@@ -290,10 +286,27 @@ export default function TryoutStart() {
               <h3 className="text-lg font-bold mb-3">Informasi Penting</h3>
               <ul className="space-y-2 text-sm">
                 <li className="flex items-start gap-2"><span className="text-[#fbbf24]">✓</span><span>Koneksi internet stabil</span></li>
-                <li className="flex items-start gap-2"><span className="text-[#fbbf24]">✓</span><span>Kerjakan dengan fokus</span></li>
                 <li className="flex items-start gap-2"><span className="text-[#fbbf24]">✓</span><span>Timer otomatis berjalan</span></li>
+                <li className="flex items-start gap-2"><span className="text-[#fbbf24]">✓</span><span>Tidak bisa mengulang jika disubmit</span></li>
               </ul>
             </div>
+
+            {/* ✅ NEW: Warning Anti-Cheat Card (Muncul saat tombol siap ditekan) */}
+            {(buttonState.type === 'start' || buttonState.type === 'continue') && (
+              <div className="bg-red-50 border-l-4 border-red-500 rounded-xl p-4 shadow-sm animate-fade-in">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="text-sm font-bold text-red-800 mb-1">Sistem Pengawas Aktif!</h3>
+                    <ul className="text-xs text-red-700 space-y-1 list-disc pl-4">
+                      <li>Dilarang pindah tab browser atau membuka aplikasi lain.</li>
+                      <li>Fitur Klik Kanan & Copy-Paste dimatikan.</li>
+                      <li>Jika melanggar batas peringatan, <strong>ujian dikumpulkan paksa.</strong></li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* ACTION BUTTON DENGAN TIMER & LOADING STATE */}
             <button
@@ -312,7 +325,7 @@ export default function TryoutStart() {
               )}
             </button>
 
-            {/* ✅ FIX: Warning Message Disembunyikan Saat Loading Database */}
+            {/* Warning Message Disembunyikan Saat Loading Database */}
             {!targetInfo && buttonState.type === 'start' && !isProgressLoading && (
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 text-center">
                 <p className="text-xs text-orange-600 font-medium">

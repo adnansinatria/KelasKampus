@@ -33,7 +33,7 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
   
   const isSubmittingRef = useRef(false);
   
-  // ✅ NEW: Antrean Jawaban (Queue) untuk Batching
+  // ✅ Antrean Jawaban (Queue) untuk Batching
   const unsyncedQueue = useRef<Record<string, any>>({});
 
   const updateTimer = useCallback(async (time: number) => {
@@ -45,7 +45,7 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
     }
   }, [sessionId]);
 
-  // ✅ NEW: Fungsi untuk mengirim borongan jawaban ke server (Flush)
+  // ✅ Fungsi untuk mengirim borongan jawaban ke server (Flush)
   const forceSync = useCallback(async () => {
     const queueItems = Object.values(unsyncedQueue.current);
     if (queueItems.length === 0) return;
@@ -74,7 +74,7 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
     }
   }, []);
 
-  // ✅ NEW: Interval Autosave setiap 10 Detik
+  // ✅ Interval Autosave setiap 10 Detik
   useEffect(() => {
     const syncInterval = setInterval(() => {
       forceSync();
@@ -82,7 +82,6 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
 
     return () => clearInterval(syncInterval);
   }, [forceSync]);
-
 
   const submitExamLogic = useCallback(async () => {
     if (isSubmittingRef.current) {
@@ -97,7 +96,7 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
       
       console.log('📤 Starting atomic submission process...');
 
-      // ✅ PASTIKAN SEMUA ANTARAN JAWABAN TERKIRIM SEBELUM SUBMIT
+      // ✅ PASTIKAN SEMUA ANTREAN JAWABAN TERKIRIM SEBELUM SUBMIT
       console.log('0️⃣ Flushing remaining answers in queue...');
       await forceSync();
 
@@ -225,27 +224,20 @@ export function useExamSession(sessionId: string, kategoriId?: string) {
     if (sessionId) fetchSessionData();
   }, [sessionId, fetchSessionData]);
 
-  // ✅ UPDATE: Save Answer masuk ke Antrean (Queue)
+  // ✅ UPDATE SECURE: Save Answer masuk ke Antrean (Hanya kirim apa yang dipilih siswa)
   const saveAnswer = useCallback((questionId: string, answer: string) => {
     // Optimistic Update: UI langsung berubah tanpa delay
     setAnswers(prev => ({ ...prev, [questionId]: answer }));
     setIsSaving(true);
 
-    const currentQuestion = questions.find(q => String(q.id) === String(questionId));
-    if (!currentQuestion) return;
-
-    const isCorrect = answer === currentQuestion.jawaban_benar;
-
-    // Simpan ke Queue, bukan langsung tembak API (Debouncing by ID)
+    // Simpan ke Queue. Kita tidak lagi mengecek jawaban_benar di sini!
+    // Server (Database) yang akan mengeceknya secara diam-diam.
     unsyncedQueue.current[questionId] = {
       session_id: sessionId,
       question_id: questionId,
       selected_answer: answer,
-      is_correct: isCorrect,
-      question_difficulty: currentQuestion.difficulty || 0,
-      question_discrimination: currentQuestion.discrimination || 1.0,
     };
-  }, [sessionId, questions]);
+  }, [sessionId]);
 
   const saveBookmarks = useCallback(async (bookmarks: number[]) => {
     try {
