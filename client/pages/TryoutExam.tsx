@@ -101,33 +101,42 @@ export default function TryoutExam() {
     } catch (err) {}
   };
 
-  // ✅ FITUR ANTI-CHEAT: Deteksi Pindah Tab / Aplikasi
+  // ✅ FITUR ANTI-CHEAT STRICT MODE: Deteksi Pindah Tab & Hilang Fokus (Blur)
   useEffect(() => {
     if (!sessionId || isSubmitting || isVerifying || isLoading) return;
 
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        // Siswa meninggalkan tab/layar ujian
-        setCheatWarnings((prev) => {
-          const newCount = prev + 1;
-          if (newCount >= MAX_WARNINGS) {
-            toast.error("🚨 PELANGGARAN FATAL! Ujian dikumpulkan paksa karena Anda berulang kali keluar dari layar ujian.", { duration: 8000 });
-            submitExam(); // Kumpulkan paksa otomatis!
-          } else {
-            toast.error(`⚠️ PERINGATAN KECURANGAN (${newCount}/${MAX_WARNINGS})! Jangan tinggalkan halaman ujian atau nilai akan dibatalkan otomatis.`, {
-              duration: 6000,
-              icon: '👀'
-            });
-          }
-          return newCount;
-        });
-      }
+    const handleViolation = () => {
+      setCheatWarnings((prev) => {
+        const newCount = prev + 1;
+        if (newCount >= MAX_WARNINGS) {
+          toast.error("🚨 PELANGGARAN FATAL! Ujian dikumpulkan paksa karena Anda berulang kali keluar dari layar ujian.", { duration: 8000 });
+          submitExam(); // Kumpulkan paksa otomatis!
+        } else {
+          toast.error(`⚠️ PERINGATAN KECURANGAN (${newCount}/${MAX_WARNINGS})! Jangan klik di luar area ujian atau pindah aplikasi.`, {
+            duration: 6000,
+            icon: '👀'
+          });
+        }
+        return newCount;
+      });
     };
 
+    const handleVisibilityChange = () => {
+      if (document.hidden) handleViolation(); // Terdeteksi pindah tab / minimize
+    };
+
+    const handleBlur = () => {
+      handleViolation(); // Terdeteksi klik jendela lain (Split Screen / Notifikasi)
+    };
+
+    // Tambahkan Event Listener untuk memantau tab dan klik
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleBlur); 
     
     return () => {
+      // Bersihkan event listener saat keluar halaman
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleBlur);
     };
   }, [sessionId, isSubmitting, submitExam, isVerifying, isLoading]);
 
@@ -252,7 +261,7 @@ export default function TryoutExam() {
           <div className="mb-4 bg-red-100 border-l-4 border-red-500 text-red-700 p-4 rounded shadow-sm flex justify-between items-center animate-pulse">
             <div>
               <p className="font-bold">⚠️ Sistem Pengawas Aktif!</p>
-              <p className="text-sm">Anda telah terdeteksi meninggalkan halaman sebanyak <strong>{cheatWarnings} kali</strong>. Jika mencapai {MAX_WARNINGS} kali, ujian otomatis dihentikan.</p>
+              <p className="text-sm">Anda telah terdeteksi mengalihkan fokus dari halaman ujian sebanyak <strong>{cheatWarnings} kali</strong>. Jika mencapai {MAX_WARNINGS} kali, ujian otomatis dihentikan.</p>
             </div>
           </div>
         )}
